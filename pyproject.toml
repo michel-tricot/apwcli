@@ -1,0 +1,57 @@
+# This pyproject is both the uv workspace root and the publishable apwcli package.
+# The apwlib package lives in packages/.
+
+[project]
+name = "apwcli"
+version = "0.1.0"
+description = "Command-line interface for apwlib."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["apwlib"]
+
+[project.scripts]
+apwcli = "apwcli.cli:main"
+
+[tool.uv.sources]
+apwlib = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-examples>=0.0.18",
+    "ruff>=0.12",
+    "ty",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Markdown code blocks use pytest-examples' `#> output` convention and are
+# linted/formatted by tests/test_docs.py, not by ruff directly.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "packages/apwlib/tests",
+]
