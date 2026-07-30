@@ -242,6 +242,9 @@ an event handler:
 - A single in-flight request has a native-reply timeout, so a request the helper
   never answers is released instead of wedging the bridge.
 - It reports pairing state (`{paired}`) and reconnects once on WebSocket close.
+- A periodic keepalive (a no-op `getPlatformInfo` every 20s, permission-free) resets
+  the MV3 idle timer so the worker isn't evicted — which would silently drop the
+  pairing — and redials the socket if it has closed.
 
 ## Models
 
@@ -283,12 +286,18 @@ class OTPEntry:
 
 ## Notes & limits
 
-- **Service-worker eviction:** the paired session lives in the MV3 worker, which
-  the browser may evict; the bridge reconnects, and an evicted pairing surfaces
-  as `NotPairedError` so the client can re-pair.
-- **Version drift:** the daemon reads the native-messaging manifest for the
-  helper path and locates the installed extension dynamically, rather than
-  hard-coding versions.
+- **Service-worker eviction:** the paired session lives in the MV3 worker. A
+  keepalive (see [The bridge](#the-bridge)) resets the idle timer to prevent
+  eviction; if the worker is still lost, the bridge reconnects and an evicted
+  pairing surfaces as `NotPairedError` so the client can re-pair.
+- **Browser lifetime:** the daemon watches its managed browser and self-exits if
+  it dies (freeing the singleton lock and cleaning up), rather than lingering with
+  a dead bridge. A failure while launching the browser or loading the extension
+  likewise terminates the child before exiting, so no orphaned browsers accumulate.
+- **Version drift:** the daemon reads the native-messaging manifest for the helper
+  path and locates the installed extension dynamically. It records the copied
+  version and rebuilds its working copy when the installed extension updates, so a
+  new iCloud Passwords release is picked up rather than frozen at first build.
 - **Headless loading:** the extension is loaded via CDP `Extensions.loadUnpacked`,
   which needs the browser launched with remote debugging +
   `--enable-unsafe-extension-debugging`.

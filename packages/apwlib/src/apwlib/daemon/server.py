@@ -19,6 +19,7 @@ import shutil
 import signal
 import socket as socketlib
 from pathlib import Path
+from typing import Protocol
 
 import websockets
 
@@ -190,6 +191,18 @@ def _acquire_singleton_lock() -> int | None:
     return fd
 
 
+class _Waitable(Protocol):
+    async def wait(self) -> int: ...
+
+
+async def _watch_child(child: _Waitable, stop: asyncio.Future[None]) -> None:
+    """Trigger shutdown if the managed browser exits, so the lock frees and cleanup runs."""
+    with contextlib.suppress(Exception):
+        await child.wait()
+    if not stop.done():
+        stop.set_result(None)
+
+
 async def run(browser: Browser) -> None:
     """Run the daemon until interrupted. No-op if another daemon already holds the lock."""
     ensure_data_dir()
@@ -204,44 +217,55 @@ async def run(browser: Browser) -> None:
     ws_port = _free_port()
     ws_server = await websockets.serve(session.serve, "127.0.0.1", ws_port)
 
-    extension_path = build_extension(ws_port, token)
-    profile = _prepare_profile(browser)
-    devtools_port = _free_port()
-
-    child = await asyncio.create_subprocess_exec(
-        str(browser.binary),
-        f"--user-data-dir={profile}",
-        f"--remote-debugging-port={devtools_port}",
-        *_BROWSER_FLAGS,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    await load_unpacked_extension(devtools_port, str(extension_path))
-
-    stop = asyncio.get_running_loop().create_future()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with contextlib.suppress(NotImplementedError):
-            asyncio.get_running_loop().add_signal_handler(
-                sig, lambda: stop.done() or stop.set_result(None)
-            )
-
-    if SOCKET_PATH.exists():
-        SOCKET_PATH.unlink()
-    unix_server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, session, stop), path=str(SOCKET_PATH)
-    )
-    SOCKET_PATH.chmod(0o600)
-
-    print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
+    # Everything past the lock is guarded: a failure while launching the browser or
+    # loading the extension must still terminate the child and release the lock, or
+    # we'd orphan a browser and pile more up on every retry.
+    child: asyncio.subprocess.Process | None = None
+    unix_server: asyncio.Server | None = None
+    watcher: asyncio.Task[None] | None = None
     try:
+        extension_path = build_extension(ws_port, token)
+        profile = _prepare_profile(browser)
+        devtools_port = _free_port()
+
+        child = await asyncio.create_subprocess_exec(
+            str(browser.binary),
+            f"--user-data-dir={profile}",
+            f"--remote-debugging-port={devtools_port}",
+            *_BROWSER_FLAGS,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await load_unpacked_extension(devtools_port, str(extension_path))
+
+        stop = asyncio.get_running_loop().create_future()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                asyncio.get_running_loop().add_signal_handler(
+                    sig, lambda: stop.done() or stop.set_result(None)
+                )
+        watcher = asyncio.create_task(_watch_child(child, stop))
+
+        if SOCKET_PATH.exists():
+            SOCKET_PATH.unlink()
+        unix_server = await asyncio.start_unix_server(
+            lambda r, w: _handle_client(r, w, session, stop), path=str(SOCKET_PATH)
+        )
+        SOCKET_PATH.chmod(0o600)
+
+        print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
         await stop
     finally:
-        unix_server.close()
+        if watcher is not None:
+            watcher.cancel()
+        if unix_server is not None:
+            unix_server.close()
         ws_server.close()
-        with contextlib.suppress(ProcessLookupError):
-            child.terminate()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(child.wait(), 5)
+        if child is not None:
+            with contextlib.suppress(ProcessLookupError):
+                child.terminate()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(child.wait(), 5)
         with contextlib.suppress(FileNotFoundError):
             SOCKET_PATH.unlink()
         os.close(lock_fd)

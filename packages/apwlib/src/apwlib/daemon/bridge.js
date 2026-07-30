@@ -236,6 +236,34 @@
     };
   }
 
+  // Keep the service worker alive. MV3 evicts an idle worker (~30s); eviction would
+  // silently drop the pairing and the bridge, and the reconnect timer dies with the
+  // worker. A periodic no-op API call resets the idle timer, and we redial the socket
+  // if it has dropped. Permission-free (getPlatformInfo needs none), so no manifest
+  // change — works across Chromium versions.
+  const KEEPALIVE_MS = 20000; // under the ~30s idle-eviction window
+  function keepAlive() {
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getPlatformInfo) {
+        chrome.runtime.getPlatformInfo(() => {});
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+    if (!isOpen()) {
+      try {
+        connect();
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+  }
+  try {
+    setInterval(keepAlive, KEEPALIVE_MS);
+  } catch (_e) {
+    /* ignore */
+  }
+
   // Ensure the native port exists and route its replies to us.
   try {
     if (typeof g_nativeAppPort === "undefined" || !g_nativeAppPort) {
