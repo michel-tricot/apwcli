@@ -57,7 +57,7 @@ apwcli pw get github.com me@example.com       # password entry, masked in the ta
 apwcli pw get github.com me@example.com -c    # copy to clipboard, print nothing
 apwcli pw get github.com me@example.com --show   # reveal in the table
 apwcli pw save github.com me@example.com      # create/update (prompts)
-printf '%s' "$PW" | apwcli pw save github.com me@example.com --stdin
+printf '%s' "$PW" | apwcli pw save github.com me@example.com   # piped: no prompt
 ```
 
 Sites match by registrable domain: `github.com`, `https://gist.github.com/x`,

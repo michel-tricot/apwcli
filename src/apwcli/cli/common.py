@@ -1,0 +1,170 @@
+"""Shared Typer apps, output rendering, and helpers for the CLI commands."""
+
+from __future__ import annotations
+
+import dataclasses
+import enum
+import json
+import subprocess
+import sys
+from typing import Annotated, Any, NoReturn
+
+import typer
+from apwlib import ApplePasswords, ApwError, NotPairedError, Status
+from apwlib import __version__ as _apwlib_version
+from rich import box
+from rich.console import Console
+from rich.table import Table
+
+from apwcli import __version__
+
+console = Console()
+
+app = typer.Typer(no_args_is_help=True, add_completion=False, help="🔑 A CLI for Apple Passwords.")
+daemon_app = typer.Typer(no_args_is_help=True, help="Manage the background daemon and pairing.")
+pw_app = typer.Typer(no_args_is_help=True, help="Manage accounts and passwords.")
+otp_app = typer.Typer(no_args_is_help=True, help="Read one-time codes.")
+skills_app = typer.Typer(no_args_is_help=True, help="Manage the bundled agent skill.")
+mcp_app = typer.Typer(no_args_is_help=True, help="Serve Apple Passwords to AI apps over MCP.")
+app.add_typer(pw_app, name="pw", rich_help_panel="Commands")
+app.add_typer(otp_app, name="otp", rich_help_panel="Commands")
+app.add_typer(daemon_app, name="daemon", rich_help_panel="Daemon & pairing")
+app.add_typer(mcp_app, name="mcp", rich_help_panel="Agents")
+app.add_typer(skills_app, name="skills", rich_help_panel="Agents")
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"apwcli {__version__} (apwlib {_apwlib_version})")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_print_version, is_eager=True, help="Print the version and exit."
+        ),
+    ] = False,
+) -> None:
+    pass
+
+
+def _prompt_pin() -> str:
+    if sys.stdin.isatty():
+        return typer.prompt("Enter the PIN shown by macOS")
+    from apwlib.pinwindow import request_pin  # no TTY: collect the PIN in a small window
+
+    return request_pin()
+
+
+# An unpaired command auto-pairs: it pops the macOS PIN dialog and collects the code
+# from the terminal — or, without a TTY, from a small on-screen PIN window.
+client = ApplePasswords(pin_provider=_prompt_pin)
+
+
+class Format(enum.StrEnum):
+    text = "text"
+    json = "json"
+    table = "table"
+
+
+# --format applies only to commands that return password/OTP data:
+# text (pipe-friendly TSV), json (for agents), table (pretty, default).
+FormatOption = Annotated[
+    Format,
+    typer.Option("--format", "-o", help="Output format: text, json, or table."),
+]
+
+
+# --- rendering ---------------------------------------------------------------
+def _dot(ok: bool) -> str:
+    # click.echo strips ANSI when output isn't a TTY, so pipes stay clean.
+    return typer.style("●", fg=typer.colors.GREEN if ok else typer.colors.RED)
+
+
+def status_line(text: str, ok: bool = True) -> None:
+    typer.echo(f"{_dot(ok)} {text}")
+
+
+def render_status(st: dict[str, bool]) -> None:
+    """Daemon + pairing status with green/red dots."""
+    running, bridge, paired = st["running"], st["bridge"], st.get("paired", False)
+    daemon_txt = "running" if running else "stopped"
+    ext_txt = ("connected" if bridge else "disconnected") if running else "—"
+    paired_txt = ("paired" if paired else "not paired") if (running and bridge) else "—"
+    status_line(f"daemon     {daemon_txt}", running)
+    status_line(f"extension  {ext_txt}", bridge)
+    status_line(f"pairing    {paired_txt}", paired)
+
+
+def _columns(rows: list[dict[str, Any]]) -> list[str]:
+    """Column keys in first-seen order, dropping any empty in every row.
+
+    Keeps `pw list` (no passwords retrieved) from showing an empty password column while
+    `pw get` (passwords present) still does.
+    """
+    keys = list({key: None for row in rows for key in row})
+    return [k for k in keys if any(row.get(k) not in (None, "", []) for row in rows)]
+
+
+def _print_table(rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        console.print("[dim](no results)[/dim]")
+        return
+    columns = _columns(rows)
+    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="dim")
+    for column in columns:
+        table.add_column(column.replace("_", " "))
+    for row in rows:
+        table.add_row(*["" if row.get(c) is None else str(row.get(c)) for c in columns])
+    console.print(table)
+
+
+_MASK = "••••••••"
+
+
+def emit(entries: list[Any], fmt: Format, reveal: bool = True) -> None:
+    """Render password/OTP results in the chosen format.
+
+    Tables are for human eyes (and terminal scrollback), so passwords are masked there
+    unless ``reveal``; `text` and `json` are for pipes and always carry the real values.
+    """
+    rows = [dataclasses.asdict(e) for e in entries]
+    if fmt is Format.table and not reveal:
+        rows = [{**row, "password": _MASK} if row.get("password") else row for row in rows]
+    if fmt is Format.json:
+        compact = [{k: v for k, v in row.items() if v not in (None, [], "")} for row in rows]
+        typer.echo(json.dumps({"results": compact, "status": int(Status.SUCCESS)}))
+        return
+    if fmt is Format.text:
+        columns = _columns(rows)
+        for row in rows:
+            typer.echo("\t".join("" if row.get(c) is None else str(row.get(c)) for c in columns))
+        return
+    _print_table(rows)
+
+
+def fail(exc: ApwError, fmt: Format | None = None) -> NoReturn:
+    msg = str(exc)
+    if isinstance(exc, NotPairedError):
+        msg += " — run `apwcli daemon pair`"
+    if fmt is Format.json:
+        typer.echo(json.dumps({"error": msg, "status": int(exc.status), "results": []}), err=True)
+    else:
+        typer.echo(f"error: {msg}", err=True)
+    raise typer.Exit(code=int(exc.status))
+
+
+def copy_secret(candidates: list[tuple[str, str | None]], what: str) -> None:
+    """Copy a single secret to the macOS clipboard, refusing ambiguity."""
+    found = [(user, value) for user, value in candidates if value]
+    if not found:
+        fail(ApwError(Status.NO_RESULTS, f"no {what} to copy"))
+    if len(found) > 1:
+        users = ", ".join(user for user, _ in found)
+        fail(ApwError(Status.INVALID_PARAM, f"multiple matches ({users}) — narrow by username"))
+    username, secret = found[0]
+    subprocess.run(["pbcopy"], input=secret.encode(), check=True)
+    status_line(f"copied {what} for {username} to the clipboard")

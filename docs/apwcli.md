@@ -9,7 +9,7 @@ $ pip install apwcli
 
 Requires macOS with the iCloud Passwords extension installed in a supported
 browser (Chrome, Brave, Edge, or Chromium). `apwcli --version` prints the
-installed version.
+installed apwcli and apwlib versions.
 
 ## Getting started
 
@@ -33,7 +33,7 @@ $ apwcli pw get github.com me@example.com      # password entry (masked in the t
 $ apwcli pw get github.com me@example.com --show   # reveal in the table
 $ apwcli pw get github.com me@example.com -c   # copy to clipboard, print nothing
 $ apwcli pw save github.com me@example.com     # create/update (prompts)
-$ printf 'correct horse' | apwcli pw save example.com me@example.com --stdin
+$ printf 'correct horse' | apwcli pw save example.com me@example.com  # piped: reads stdin
 ```
 
 Tables mask passwords (`••••••••`) so they stay out of terminal scrollback;
@@ -78,14 +78,19 @@ $ apwcli daemon status
 
 $ apwcli daemon pair             # (re)pair; --pin 123456 to skip the prompt
 $ apwcli daemon stop             # stop the daemon and its browser
+$ apwcli daemon restart          # replace a wedged daemon with a fresh one
 $ apwcli daemon start            # pre-warm; --foreground to run attached,
                                  # --browser to pick one (auto, chromium, chrome, brave, edge)
 ```
 
-The daemon runs detached and survives closing the terminal. Pairing lasts for
-the daemon's lifetime — keep it running and the PIN stays rare. (A pairing
-cannot be persisted across restarts: the helper generates a fresh PIN per
-handshake by design — see the [design notes](design/apwlib.md).)
+The daemon runs detached and survives closing the terminal. If it ever wedges
+(running, but `extension disconnected` — e.g. its browser was killed),
+commands auto-recover by replacing it, and `apwcli daemon restart` does the
+same on demand; `daemon start` also replaces an unhealthy daemon rather than
+deferring to it. Pairing lasts for the daemon's lifetime — keep it running and
+the PIN stays rare. (A pairing cannot be persisted across restarts: the helper
+generates a fresh PIN per handshake by design — see the
+[design notes](design/apwlib.md).)
 
 ## Agents
 

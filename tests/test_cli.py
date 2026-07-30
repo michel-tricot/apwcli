@@ -115,7 +115,9 @@ def test_pw_get_clipboard_copies_without_printing(monkeypatch: pytest.MonkeyPatc
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
     copied: list[bytes] = []
     monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
-    monkeypatch.setattr("apwcli.cli.subprocess.run", lambda *_a, input, **_k: copied.append(input))
+    monkeypatch.setattr(
+        "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
+    )
     result = runner.invoke(app, ["pw", "get", "github.com", "-c"])
     assert result.exit_code == 0
     assert copied == [b"hunter2"]
@@ -142,18 +144,32 @@ def test_otp_get_clipboard_copies_code(monkeypatch: pytest.MonkeyPatch) -> None:
     entries = [OTPEntry(username="me@example.com", domain="github.com", code="123456")]
     copied: list[bytes] = []
     monkeypatch.setattr("apwcli.cli.client.get_otp", lambda _url: entries)
-    monkeypatch.setattr("apwcli.cli.subprocess.run", lambda *_a, input, **_k: copied.append(input))
+    monkeypatch.setattr(
+        "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
+    )
     result = runner.invoke(app, ["otp", "get", "github.com", "-c"])
     assert result.exit_code == 0
     assert copied == [b"123456"]
 
 
-def test_version() -> None:
-    from apwcli import __version__
+def test_version_names_both_packages() -> None:
+    from apwlib import __version__ as lib_version
+
+    from apwcli import __version__ as cli_version
 
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == __version__
+    assert result.stdout.strip() == f"apwcli {cli_version} (apwlib {lib_version})"
+
+
+def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        "apwcli.cli.client.save_account", lambda url, user, pw: saved.append((url, user, pw))
+    )
+    result = runner.invoke(app, ["pw", "save", "example.com", "me@example.com"], input="s3cret\n")
+    assert result.exit_code == 0
+    assert saved == [("example.com", "me@example.com", "s3cret")]
 
 
 def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,7 +198,7 @@ def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_prompt_pin_uses_window_without_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    from apwcli.cli import _prompt_pin
+    from apwcli.cli.common import _prompt_pin
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr("apwlib.pinwindow.request_pin", lambda: "654321")
@@ -192,7 +208,7 @@ def test_prompt_pin_uses_window_without_tty(monkeypatch: pytest.MonkeyPatch) -> 
 def test_prompt_pin_uses_terminal_with_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    from apwcli.cli import _prompt_pin
+    from apwcli.cli.common import _prompt_pin
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("typer.prompt", lambda _msg: "111222")
