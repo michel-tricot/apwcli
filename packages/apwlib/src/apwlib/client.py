@@ -94,6 +94,11 @@ class _Daemon:
     # -- lifecycle -------------------------------------------------------------
     def _spawn(self) -> None:
         """Launch the daemon detached, so it survives this process exiting."""
+        if sys.platform != "darwin":
+            raise ApwError(
+                Status.GENERIC_ERROR,
+                "apwlib requires macOS (the Apple Passwords helper is macOS-only)",
+            )
         ensure_data_dir()
         log = open(LOG_PATH, "a")  # noqa: SIM115 (handed to the child; closed on our exit)
         subprocess.Popen(

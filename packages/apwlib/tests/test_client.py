@@ -1,7 +1,9 @@
 """Client transport: error distinction and single-retry behavior (no real daemon)."""
 
+import sys
+
 import pytest
-from apwlib import ApplePasswords, DaemonNotRunningError, NotPairedError
+from apwlib import ApplePasswords, ApwError, DaemonNotRunningError, NotPairedError
 from apwlib.protocol import Status
 
 
@@ -80,3 +82,10 @@ def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert pw.get_login_names("github.com") == []
     assert calls == {"raw": 2, "spawn": 1, "wait": 1}  # started once, retried once
+
+
+def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
+    with pytest.raises(ApwError, match="macOS"):
+        pw.get_login_names("github.com")

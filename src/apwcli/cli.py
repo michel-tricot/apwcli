@@ -7,8 +7,9 @@ import contextlib
 import dataclasses
 import enum
 import json
+import subprocess
 import sys
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import typer
 from apwlib import ApplePasswords, ApwError, NotPairedError, Status
@@ -17,6 +18,9 @@ from apwlib.daemon import BROWSERS, installed_browsers
 from rich import box
 from rich.console import Console
 from rich.table import Table
+
+from apwcli import __version__
+from apwcli.agents import mcp_app, skills_app
 
 _console = Console()
 
@@ -27,6 +31,26 @@ otp_app = typer.Typer(no_args_is_help=True, help="Read one-time codes.")
 app.add_typer(pw_app, name="pw", rich_help_panel="Commands")
 app.add_typer(otp_app, name="otp", rich_help_panel="Commands")
 app.add_typer(daemon_app, name="daemon", rich_help_panel="Daemon & pairing")
+app.add_typer(mcp_app, name="mcp", rich_help_panel="Agents")
+app.add_typer(skills_app, name="skills", rich_help_panel="Agents")
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_print_version, is_eager=True, help="Print the version and exit."
+        ),
+    ] = False,
+) -> None:
+    pass
 
 
 def _prompt_pin() -> str:
@@ -95,9 +119,18 @@ def _print_table(rows: list[dict[str, Any]]) -> None:
     _console.print(table)
 
 
-def emit(entries: list[Any], fmt: Format) -> None:
-    """Render password/OTP results in the chosen format."""
+_MASK = "••••••••"
+
+
+def emit(entries: list[Any], fmt: Format, reveal: bool = True) -> None:
+    """Render password/OTP results in the chosen format.
+
+    Tables are for human eyes (and terminal scrollback), so passwords are masked there
+    unless ``reveal``; `text` and `json` are for pipes and always carry the real values.
+    """
     rows = [dataclasses.asdict(e) for e in entries]
+    if fmt is Format.table and not reveal:
+        rows = [{**row, "password": _MASK} if row.get("password") else row for row in rows]
     if fmt is Format.json:
         compact = [{k: v for k, v in row.items() if v not in (None, [], "")} for row in rows]
         typer.echo(json.dumps({"results": compact, "status": int(Status.SUCCESS)}))
@@ -110,7 +143,7 @@ def emit(entries: list[Any], fmt: Format) -> None:
     _print_table(rows)
 
 
-def _fail(exc: ApwError, fmt: Format | None = None) -> None:
+def _fail(exc: ApwError, fmt: Format | None = None) -> NoReturn:
     msg = str(exc)
     if isinstance(exc, NotPairedError):
         msg += " — run `apwcli daemon pair`"
@@ -119,6 +152,19 @@ def _fail(exc: ApwError, fmt: Format | None = None) -> None:
     else:
         typer.echo(f"error: {msg}", err=True)
     raise typer.Exit(code=int(exc.status))
+
+
+def _copy_secret(candidates: list[tuple[str, str | None]], what: str) -> None:
+    """Copy a single secret to the macOS clipboard, refusing ambiguity."""
+    found = [(user, value) for user, value in candidates if value]
+    if not found:
+        _fail(ApwError(Status.NO_RESULTS, f"no {what} to copy"))
+    if len(found) > 1:
+        users = ", ".join(user for user, _ in found)
+        _fail(ApwError(Status.INVALID_PARAM, f"multiple matches ({users}) — narrow by username"))
+    username, secret = found[0]
+    subprocess.run(["pbcopy"], input=secret.encode(), check=True)
+    _status_line(f"copied {what} for {username} to the clipboard")
 
 
 # --- daemon -------------------------------------------------------------------
@@ -132,6 +178,8 @@ def daemon_start(
     ),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
+    if sys.platform != "darwin":
+        _fail(ApwError(Status.GENERIC_ERROR, "apwcli requires macOS"))
     if not installed_browsers():
         hints = "\n".join(f"  brew install --cask {b.brew_cask}  # {b.name}" for b in BROWSERS)
         _fail(ApwError(Status.GENERIC_ERROR, f"No supported browser found. Install one:\n{hints}"))
@@ -145,7 +193,6 @@ def daemon_start(
         chosen = resolve_browser(browser or read_config().get("browser"))
         if chosen is None:
             _fail(ApwError(Status.INVALID_PARAM, f"Browser not available: {browser}"))
-            return
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(run(chosen))
         return
@@ -206,12 +253,20 @@ def pw_get(
     url: str,
     username: str = typer.Argument("", help="Restrict to this username."),
     fmt: FormatOption = Format.table,
+    show: bool = typer.Option(False, "--show", help="Reveal passwords in the table output."),
+    clipboard: bool = typer.Option(
+        False, "--clipboard", "-c", help="Copy the password to the clipboard, print nothing."
+    ),
 ) -> None:
     """Get password(s) for a URL."""
     try:
-        emit(client.get_password(url, username), fmt)
+        entries = client.get_password(url, username)
     except ApwError as exc:
         _fail(exc, fmt)
+    if clipboard:
+        _copy_secret([(e.username, e.password) for e in entries], "password")
+        return
+    emit(entries, fmt, reveal=show)
 
 
 @pw_app.command("save")
@@ -233,12 +288,22 @@ def pw_save(
 
 # --- one-time codes -----------------------------------------------------------
 @otp_app.command("get")
-def otp_get(url: str, fmt: FormatOption = Format.table) -> None:
+def otp_get(
+    url: str,
+    fmt: FormatOption = Format.table,
+    clipboard: bool = typer.Option(
+        False, "--clipboard", "-c", help="Copy the code to the clipboard, print nothing."
+    ),
+) -> None:
     """Get a one-time code for a URL."""
     try:
-        emit(client.get_otp(url), fmt)
+        entries = client.get_otp(url)
     except ApwError as exc:
         _fail(exc, fmt)
+    if clipboard:
+        _copy_secret([(e.username, e.code) for e in entries], "one-time code")
+        return
+    emit(entries, fmt)
 
 
 @otp_app.command("list")

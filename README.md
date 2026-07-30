@@ -1,89 +1,138 @@
-# apwcli
+<div align="center">
 
-Command-line access to Apple Passwords (iCloud Keychain) on macOS, built on
-[apwlib](packages/apwlib).
+# 🔑 `apwcli`
 
-```console
-$ apwcli daemon pair                       # pair once with the macOS PIN
-$ apwcli pw get github.com me@example.com  # read a password
+**Apple Passwords (iCloud Keychain) from the terminal.**
+Read passwords and one-time codes, save logins, script it all.
+
+[![CI](https://github.com/michel-tricot/apwcli/actions/workflows/ci.yml/badge.svg)](https://github.com/michel-tricot/apwcli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#)
+
+[Commands](docs/apwcli.md) ·
+[Python library](packages/apwlib) ·
+[How it works](docs/design/apwlib.md)
+
+</div>
+
+---
+
+- **Passwords & one-time codes** — read, save, and update Apple Passwords entries
+- ✨ **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
+- **Safe by default** — passwords are masked on screen; `-c` copies to the clipboard instead
+- **Scriptable** — JSON/TSV output everywhere; Python API via [`apwlib`](packages/apwlib)
+- **Zero babysitting** — a background daemon auto-starts on first use and pairs on demand
+
+## Install
+
+```sh
+uv tool install apwcli    # or: pipx install apwcli
 ```
 
-macOS only lets an approved browser reach the Apple Passwords helper, so the first command
-auto-starts a headless browser in the background (a singleton that survives closing the
-terminal) and pairs on demand — you never launch or supervise anything.
+Or from a clone: `uv sync`, then `uv run apwcli --help`.
 
-**Requirements:** macOS with the iCloud Passwords extension installed in a supported
+Requires macOS with the iCloud Passwords extension installed in a supported
 browser (Chrome, Brave, Edge, or Chromium).
 
-## Usage
+## Quick start
 
-Passwords and one-time codes — these accept `--format text|json|table` (`table` default;
-`text` is TSV for piping, `json` for scripts/agents):
-
-```console
-$ apwcli pw list github.com                          # accounts for a site
-$ apwcli pw get github.com me@example.com            # the password
-$ apwcli pw save github.com me@example.com           # create/update (prompts)
-$ apwcli otp get github.com                          # one-time code
-$ apwcli pw get github.com me@example.com -o text    # just the fields, tab-separated
+```sh
+apwcli daemon pair                       # once: enter the PIN macOS shows
+apwcli pw list github.com                # accounts saved for a site
+apwcli pw get github.com me@example.com  # the password (masked on screen)
+apwcli otp get github.com                # current one-time code
 ```
 
-Daemon and pairing:
+## Commands
 
-```console
-$ apwcli daemon status     # daemon / extension / pairing state
-$ apwcli daemon pair       # (re)pair with the macOS PIN
-$ apwcli daemon stop       # stop the daemon and its browser
+### Passwords
+
+```sh
+apwcli pw list github.com                     # accounts for a site
+apwcli pw get github.com me@example.com       # password entry, masked in the table
+apwcli pw get github.com me@example.com -c    # copy to clipboard, print nothing
+apwcli pw get github.com me@example.com --show   # reveal in the table
+apwcli pw save github.com me@example.com      # create/update (prompts)
+printf '%s' "$PW" | apwcli pw save github.com me@example.com --stdin
 ```
 
-See [docs/apwcli.md](docs/apwcli.md) for the full guide and
-[docs/design/apwlib.md](docs/design/apwlib.md) for how it works and why a browser is
-required.
+Sites match by registrable domain: `github.com`, `https://gist.github.com/x`,
+and `www.github.com` all find the same accounts.
 
-## Repository layout
+### One-time codes
 
-This repository is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)
-publishing two packages:
+```sh
+apwcli otp get github.com        # the current code
+apwcli otp get github.com -c     # straight to the clipboard
+apwcli otp list github.com       # accounts that have codes
+```
 
-- **`apwcli`** — this top-level project (`src/apwcli`), the CLI.
-- **`apwlib`** — the core library, in [`packages/apwlib`](packages/apwlib).
+### Scripting
 
-Documentation lives in [`docs/`](docs). Python code blocks in the docs and READMEs are
-executed as part of the test suite, so examples cannot go stale.
+Data commands take `--format` / `-o`: `table` (default), `json`, or `text`
+(TSV for piping). Pipes always carry the real values — masking is only for
+tables on screen.
+
+```sh
+apwcli pw get github.com me@example.com -o text | cut -f3
+apwcli otp get github.com -o json | jq -r '.results[0].code'
+```
+
+Errors exit with the protocol status code (`9` = daemon down or not paired)
+and print `error: …` to stderr, or a JSON object with `-o json`.
+
+### Daemon & pairing
+
+Commands auto-start a background daemon on first use — you never launch or
+supervise anything. Pairing asks for a 6-digit PIN that macOS displays; it
+lasts for the daemon's lifetime, so keeping the daemon running keeps the PIN
+rare.
+
+```sh
+apwcli daemon status    # daemon / extension / pairing state
+apwcli daemon pair      # (re)pair with the macOS PIN
+apwcli daemon stop      # stop the daemon and its browser
+```
+
+## Agents
+
+apwcli ships with integrations for AI agents:
+
+```sh
+apwcli skills install          # install the Claude skill into ~/.claude/skills
+apwcli mcp install             # wire the MCP server into Claude, Cursor, VS Code, …
+```
+
+The MCP server exposes account listings, one-time codes, saving, and pairing —
+**never plaintext passwords** unless you start it with
+`apwcli mcp run --allow-passwords` (MCP tool results travel to the model
+provider; see the [design notes](docs/design/apwlib.md)).
+
+## Library
+
+[`apwlib`](packages/apwlib) is the Python API behind the CLI:
+
+```python
+# needs a running daemon, so this block is not executed
+from apwlib import ApplePasswords
+
+pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
+for entry in pw.get_password("github.com", "me@example.com"):
+    print(entry.username, entry.password)
+```
 
 ## Development
 
-```console
-$ uv sync
+This repository is a uv workspace with two packages: `apwcli` (this project,
+`src/apwcli`) and [`apwlib`](packages/apwlib). Before committing, run the full
+validation suite — format, lint, typecheck, tests:
+
+```sh
+scripts/check.sh
 ```
 
-There are no git hooks: validation before commit/push is the responsibility of whoever
-(or whatever agent — see [AGENTS.md](AGENTS.md)) makes the change, by running:
-
-```console
-$ scripts/check.sh
-```
-
-which validates:
-
-- **format** — `uv run ruff format --check .`
-- **lint** — `uv run ruff check .`
-- **typecheck** — `uv run ty check`
-- **tests** — `uv run pytest` (includes executing all Python code blocks in the docs)
-
-Code changes must ship with matching doc updates, and implementation decisions belong in
-`docs/` (see AGENTS.md). CI runs the same suite on every push and pull request.
-
-## Common commands
-
-```console
-$ uv run apwcli pw list github.com   # run the CLI
-$ uv run pytest                      # run all tests
-$ uv run ruff format .               # format
-$ uv run ruff check --fix .          # lint and autofix
-$ uv run ty check                    # typecheck
-$ uv build --all-packages            # build both wheels/sdists into dist/
-```
-
-After an intentional behavior change, refresh doc example outputs with
-`uv run pytest tests/test_docs.py --update-examples`.
+Python code blocks in the docs and READMEs are executed by the test suite;
+after an intentional behavior change, refresh their outputs with
+`uv run pytest tests/test_docs.py --update-examples`. Contributor and agent
+guidelines live in [AGENTS.md](AGENTS.md).

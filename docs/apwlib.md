@@ -1,37 +1,43 @@
-# apwlib
+# apwlib library reference
 
-`apwlib` provides programmatic access to Apple Passwords (iCloud Keychain) on macOS. It
-is the library behind the [`apwcli`](apwcli.md) command-line tool.
-
-macOS only permits an approved browser to talk to the Apple Passwords helper, so `apwlib`
-runs a small daemon that manages a headless browser and the official iCloud Passwords
-extension; your Python code talks to that daemon over a local socket. See
-[the design notes](design/apwlib.md) for why.
-
-## Installation
+`apwlib` is programmatic access to Apple Passwords (iCloud Keychain) on macOS —
+the library behind [`apwcli`](apwcli.md).
 
 ```console
 $ pip install apwlib
 ```
 
-## Usage
+## The facade
 
-The daemon is auto-managed: the first call spins it up as a detached, singleton process
-that outlives your program and is reused afterwards. You only pair once with the macOS PIN
-(via [apwcli](apwcli.md) `daemon pair`, or a `pin_provider` — see the [apwlib README](../packages/apwlib/README.md)):
+All access goes through `ApplePasswords`. The background daemon is
+auto-managed (first call starts it, detached and reused); with a
+`pin_provider`, pairing happens on demand too:
 
 ```python
 # needs a running daemon, so this block is not executed by the test suite
 from apwlib import ApplePasswords
 
-pw = ApplePasswords()  # auto-starts the daemon on first use
-for entry in pw.get_login_names("https://github.com"):
-    print(entry.username, entry.domain)
+pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
+
+pw.get_login_names("github.com")  # accounts for a site -> list[PasswordEntry]
+pw.get_password("github.com", "me@example.com")  # -> list[PasswordEntry]
+pw.save_account("example.com", "me@example.com", "s3cret")  # create/update
+pw.list_otp("github.com")  # accounts with codes -> list[OTPEntry]
+pw.get_otp("github.com")  # the current code(s) -> list[OTPEntry]
 ```
 
-### Entries are typed
+Reads are keyed to a URL and matched by registrable domain; an empty list
+means no results. `pw.daemon` gives explicit control: `start()`, `stop()`,
+`status()`, and the pairing primitives `request_challenge()`,
+`verify_challenge(pin)`, `wait_until_paired()`.
 
-Results are dataclasses. `PasswordEntry.from_raw` shows the shape without needing a daemon:
+Constructor options: `pin_provider` (callable returning the PIN; without it an
+unpaired call raises `NotPairedError`), `auto_start=False` (require an
+already-running daemon), `socket_path` (override the daemon socket).
+
+## Entries are typed
+
+Results are dataclasses. `from_raw` shows the shape without a daemon:
 
 ```python
 from apwlib import PasswordEntry
@@ -53,7 +59,7 @@ print(entry.password)
 #> None
 ```
 
-### Errors
+## Errors
 
 Every failure raises an `ApwError` (or a subclass) carrying a `Status`:
 
@@ -67,4 +73,11 @@ except SessionError as exc:
     #> 9
 ```
 
-Python code blocks in this file are executed and lint-checked on every test run.
+The hierarchy: `SessionError` covers session problems, refined into
+`DaemonNotRunningError` (socket unreachable) and `NotPairedError` (daemon up,
+session unpaired); `ServerError` covers malformed daemon responses. Catch
+`SessionError` to re-pair, `ApwError` for everything else.
+
+Python code blocks in this file are executed and lint-checked on every test
+run. For architecture and protocol details, see the
+[design notes](design/apwlib.md).

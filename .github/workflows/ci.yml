@@ -18,3 +18,11 @@ jobs:
 
       - name: Format, lint, typecheck, tests, docs examples
         run: scripts/check.sh
+
+      - name: CLI smoke test
+        run: |
+          uv run apwcli --help
+          uv run apwcli --version
+          # No Apple Passwords helper on CI runners; the guard must exit cleanly (code 1,
+          # "requires macOS"), not traceback.
+          uv run apwcli pw list github.com && exit 1 || test $? -eq 1

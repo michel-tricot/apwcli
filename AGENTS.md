@@ -3,7 +3,10 @@
 This is a uv workspace with two publishable packages:
 
 - `apwcli` — the CLI. The top-level `pyproject.toml` is both the workspace root AND
-  this package's manifest; its code is in `src/apwcli`, tests in `tests/`.
+  this package's manifest; its code is in `src/apwcli`, tests in `tests/`. The
+  `mcp`/`skills` command groups live in `src/apwcli/agents.py`, the MCP server in
+  `src/apwcli/mcpserver.py`, and the bundled agent skill (shipped as package data)
+  in `src/apwcli/skills/`.
 - `packages/apwlib` — the core library; `apwcli` depends on it via a workspace source.
 
 The top-level `pyproject.toml` also holds the dev dependency group and ALL tool
@@ -35,11 +38,6 @@ push and pull request, so anything skipped locally will fail there.
   `packages/apwlib/src/`, update `docs/` and/or the relevant README in the same change
   (only skip when the change genuinely has no user-visible effect, and say so). There
   is no script enforcing this — you are responsible for it.
-- **Implementation decisions must be encoded in docs.** When you make a design or
-  implementation decision (library choice, API shape, error-handling strategy,
-  trade-off, rejected alternative), record it and its rationale in `docs/` — not
-  only in commit messages or conversation. Future readers and agents should be able
-  to recover the "why" from the docs alone.
 - **Doc code is executable.** Every ` ```python ` block in `docs/` and the READMEs is
   run and lint-checked by `tests/test_docs.py` (pytest-examples). Expected output is
   written as `#> ...` comments and verified against actual output. After an
@@ -60,7 +58,7 @@ push and pull request, so anything skipped locally will fail there.
 
 ```console
 $ uv sync                        # install/refresh the workspace
-$ uv run apwcli greet world      # run the CLI
+$ uv run apwcli pw list github.com   # run the CLI
 $ uv run ruff format .           # format
 $ uv run ruff check --fix .      # lint with autofix
 $ uv build --all-packages        # build both wheels/sdists into dist/
