@@ -72,7 +72,9 @@ class _Daemon:
         """Deliver a message, recovering from a missing daemon or a booting bridge.
 
         - no daemon -> auto-start (if enabled) and retry once, else ``DaemonNotRunningError``
-        - bridge not connected yet -> wait for it and retry once
+        - bridge not connected -> (auto-start) recover via ``start`` and retry once. This
+          covers both a bridge still booting and a wedged daemon (alive but bridge dead),
+          which ``start`` replaces rather than waiting on forever.
 
         Returns the raw response; an ``unpaired`` response is surfaced to the facade, not
         raised here.
@@ -86,9 +88,9 @@ class _Daemon:
             self._wait_bridge()
             response = self._send_raw(message)  # retry once after starting
 
-        if _error(response) == _NO_BRIDGE:
-            self._wait_bridge()
-            response = self._send_raw(message)  # retry once after the bridge connects
+        if _error(response) == _NO_BRIDGE and self._auto_start:
+            self.start()  # wait for a booting bridge, or replace a wedged daemon
+            response = self._send_raw(message)  # retry once after recovery
         return response
 
     # -- lifecycle -------------------------------------------------------------
@@ -124,10 +126,37 @@ class _Daemon:
             time.sleep(0.3)
         return False
 
+    def _wait_stopped(self, timeout: float = 10.0) -> bool:
+        """Block until the socket refuses connections (the daemon is gone, lock released).
+
+        A daemon mid-shutdown may still accept a connection but close it without a reply
+        (an empty, unparseable response); that means "still stopping" — keep polling until
+        the connection is refused outright, so a subsequent spawn won't lose the lock race.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                self._send_raw({"op": "status"})
+            except DaemonNotRunningError:
+                return True
+            except ValueError:
+                pass  # half-open socket during shutdown; not gone yet
+            time.sleep(0.1)
+        return False
+
     def start(self) -> bool:
-        """Ensure a daemon with a connected bridge is running (auto-spawns if needed)."""
-        if self._bridge_ready():
+        """Ensure a daemon with a connected bridge is running.
+
+        Auto-spawns if none is running. If a daemon is running but its bridge is dead
+        (a wedged singleton — e.g. the browser was closed), it is stopped and replaced,
+        since a fresh spawn would otherwise just lose the lock race and exit.
+        """
+        status = self.status()
+        if status["running"] and status["bridge"]:
             return True
+        if status["running"]:  # alive but unhealthy — replace it rather than defer to it
+            self.stop()
+            self._wait_stopped()
         self._spawn()
         return self._wait_bridge()
 
@@ -138,6 +167,13 @@ class _Daemon:
             return True
         except SessionError:
             return False
+
+    def restart(self) -> bool:
+        """Stop any running daemon and start a fresh one. Returns True if the bridge came up."""
+        self.stop()
+        self._wait_stopped()
+        self._spawn()
+        return self._wait_bridge()
 
     def status(self) -> dict[str, bool]:
         """Report daemon reachability, bridge connectivity, and pairing (does not auto-start)."""

@@ -199,6 +199,14 @@ Because a pairing can't be persisted (Part 1), the model is: pair once per
 daemon lifetime, keep the daemon (hence the browser and its in-memory session)
 alive to make the PIN rare.
 
+A running daemon can outlive its bridge (the browser is killed, the worker
+gone) and get stuck: a fresh spawn would only lose the singleton-lock race and
+exit. So `start` treats *running but bridge-dead* as unhealthy — it stops that
+daemon and replaces it — and `deliver` routes a `no extension connected`
+response through the same recovery, so commands self-heal instead of waiting on
+a bridge that will never come. `restart` (exposed as `apwcli daemon restart`)
+forces the stop-and-replace unconditionally.
+
 ## Pairing in the library
 
 The facade takes an optional `pin_provider`. On an `unpaired` response it pairs

@@ -89,3 +89,32 @@ def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch)
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
     with pytest.raises(ApwError, match="macOS"):
         pw.get_login_names("github.com")
+
+
+def test_start_replaces_a_wedged_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A daemon that is running but whose bridge is dead must be stopped and replaced,
+    # not deferred to (a fresh spawn would just lose the lock race).
+    daemon = ApplePasswords(auto_start=False).daemon
+    calls = {"stop": 0, "spawn": 0}
+    monkeypatch.setattr(
+        daemon, "status", lambda: {"running": True, "bridge": False, "paired": False}
+    )
+    monkeypatch.setattr(
+        daemon, "stop", lambda: calls.__setitem__("stop", calls["stop"] + 1) or True
+    )
+    monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: True)
+    monkeypatch.setattr(daemon, "_spawn", lambda: calls.__setitem__("spawn", calls["spawn"] + 1))
+    monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
+
+    assert daemon.start() is True
+    assert calls == {"stop": 1, "spawn": 1}
+
+
+def test_start_noop_when_bridge_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    daemon = ApplePasswords(auto_start=False).daemon
+    spawned = []
+    monkeypatch.setattr(daemon, "status", lambda: {"running": True, "bridge": True, "paired": True})
+    monkeypatch.setattr(daemon, "_spawn", lambda: spawned.append(1))
+
+    assert daemon.start() is True
+    assert spawned == []  # a healthy daemon is left alone
