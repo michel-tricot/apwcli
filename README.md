@@ -1,14 +1,18 @@
 # apwcli
 
-Command-line interface for [apwlib](packages/apwlib).
+Command-line access to Apple Passwords (iCloud Keychain) on macOS, built on
+[apwlib](packages/apwlib).
 
 ```console
-$ apwcli greet world
-Hello, world!
+$ apwcli daemon pair      # pair once with the macOS PIN (auto-starts the daemon)
+$ apwcli pw get github.com me@example.com
 ```
 
-See [docs/apwcli.md](docs/apwcli.md) for usage and [docs/apwlib.md](docs/apwlib.md) for
-the underlying library.
+The managed headless browser is auto-started on first use as a background singleton — you
+don't launch or supervise it.
+
+See [docs/apwcli.md](docs/apwcli.md) for usage, [docs/apwlib.md](docs/apwlib.md) for the
+library, and [docs/design/apwlib.md](docs/design/apwlib.md) for how it works and why.
 
 ## Repository layout
 

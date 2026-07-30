@@ -1,26 +1,110 @@
 import pytest
+from typer.testing import CliRunner
 
-from apwcli.cli import main
+from apwcli.cli import app
 
-
-def test_greet_command(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["greet", "world"]) == 0
-    assert capsys.readouterr().out == "Hello, world!\n"
+runner = CliRunner()
 
 
-def test_greet_empty_name_fails(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["greet", "   "]) == 1
-    assert "must not be empty" in capsys.readouterr().err
+def test_help() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "Apple Passwords" in result.stdout
 
 
-def test_version(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as excinfo:
-        main(["--version"])
-    assert excinfo.value.code == 0
-    assert capsys.readouterr().out.startswith("apwcli ")
+@pytest.mark.parametrize("group", ["daemon", "pw", "otp"])
+def test_subcommand_help(group: str) -> None:
+    result = runner.invoke(app, [group, "--help"])
+    assert result.exit_code == 0
 
 
-def test_no_command_fails() -> None:
-    with pytest.raises(SystemExit) as excinfo:
-        main([])
-    assert excinfo.value.code == 2
+def test_pair_lives_under_daemon() -> None:
+    assert runner.invoke(app, ["daemon", "pair", "--help"]).exit_code == 0
+    # not a top-level command
+    assert runner.invoke(app, ["pair", "--help"]).exit_code != 0
+    assert runner.invoke(app, ["auth", "--help"]).exit_code != 0
+
+
+def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "apwcli.cli.client.daemon.status",
+        lambda: {"running": False, "bridge": False, "paired": False},
+    )
+    result = runner.invoke(app, ["daemon", "status"])
+    assert result.exit_code == 9  # INVALID_SESSION
+    assert "stopped" in result.stdout
+
+
+def test_daemon_status_shows_daemon_and_pairing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "apwcli.cli.client.daemon.status",
+        lambda: {"running": True, "bridge": True, "paired": True},
+    )
+    result = runner.invoke(app, ["daemon", "status"])
+    assert result.exit_code == 0
+    assert "daemon" in result.stdout and "running" in result.stdout
+    assert "pairing" in result.stdout and "paired" in result.stdout
+
+
+def test_pw_list_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
+    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    result = runner.invoke(app, ["pw", "list", "github.com", "--format", "text"])
+    assert result.exit_code == 0
+    assert "me@example.com\tgithub.com" in result.stdout
+
+
+def test_pw_list_json_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com")]
+    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    result = runner.invoke(app, ["pw", "list", "github.com", "--format", "json"])
+    assert result.exit_code == 0
+    assert '"results"' in result.stdout and "me@example.com" in result.stdout
+
+
+def test_pw_list_table_omits_empty_password_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com", password=None)]
+    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    result = runner.invoke(app, ["pw", "list", "github.com"])
+    assert result.exit_code == 0
+    assert "username" in result.stdout
+    assert "password" not in result.stdout
+
+
+def test_pw_get_table_includes_password_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
+    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
+    result = runner.invoke(app, ["pw", "get", "github.com"])
+    assert result.exit_code == 0
+    assert "password" in result.stdout and "hunter2" in result.stdout
+
+
+def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import DaemonNotRunningError, Status
+
+    def boom(_url: str):
+        raise DaemonNotRunningError(Status.INVALID_SESSION)
+
+    monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
+    result = runner.invoke(app, ["pw", "list", "https://github.com"])
+    assert result.exit_code == 9
+
+
+def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import NotPairedError, Status
+
+    def boom(_url: str):
+        raise NotPairedError(Status.INVALID_SESSION, "session is not paired")
+
+    monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
+    result = runner.invoke(app, ["pw", "list", "github.com"])
+    assert result.exit_code == 9
+    assert "apwcli daemon pair" in result.stderr

@@ -1,11 +1,11 @@
 [project]
 name = "apwlib"
 version = "0.1.0"
-description = "Core library for apwcli."
+description = "Programmatic access to Apple Passwords (iCloud Keychain) on macOS."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["websockets>=13"]
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9"]
