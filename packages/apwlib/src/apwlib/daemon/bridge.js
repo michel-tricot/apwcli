@@ -84,6 +84,17 @@
     try {
       if (message.pin == null) {
         if (typeof ChallengePIN !== "function") return fail(message.id, SERVER_ERROR, "pairing unavailable");
+        // An abandoned handshake (challenge shown, PIN never submitted) parks the state
+        // machine mid-flight — where ChallengePIN() is a silent no-op and the PIN would
+        // never be shown again. Reset to NotInSession first so the challenge restarts.
+        if (
+          typeof resetTheSession === "function" &&
+          typeof ContextState !== "undefined" &&
+          typeof g_theState !== "undefined" &&
+          (g_theState === ContextState.ChallengeSent || g_theState === ContextState.MSG1Set)
+        ) {
+          resetTheSession(ContextState.NotInSession);
+        }
         ChallengePIN();
       } else {
         if (typeof PINSet !== "function") return fail(message.id, SERVER_ERROR, "pairing unavailable");
