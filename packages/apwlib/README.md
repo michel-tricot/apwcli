@@ -9,7 +9,10 @@ Your code talks to that daemon over a local socket via the `ApplePasswords` faca
 the [design notes](../../docs/design/apwlib.md) for why.
 
 The daemon is managed for you: the first call auto-starts it as a detached, singleton
-process that outlives your program and is reused by later calls. You don't run it by hand.
+process that outlives your program (and survives closing the terminal) and is reused by
+later calls. You don't run it by hand. Pairing lasts for the daemon's lifetime — it can't
+be persisted across a restart (the helper issues a fresh PIN per handshake by design), so
+keeping the daemon alive is what keeps the PIN rare.
 
 ## Installation
 

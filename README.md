@@ -4,15 +4,41 @@ Command-line access to Apple Passwords (iCloud Keychain) on macOS, built on
 [apwlib](packages/apwlib).
 
 ```console
-$ apwcli daemon pair      # pair once with the macOS PIN (auto-starts the daemon)
-$ apwcli pw get github.com me@example.com
+$ apwcli daemon pair                       # pair once with the macOS PIN
+$ apwcli pw get github.com me@example.com  # read a password
 ```
 
-The managed headless browser is auto-started on first use as a background singleton — you
-don't launch or supervise it.
+macOS only lets an approved browser reach the Apple Passwords helper, so the first command
+auto-starts a headless browser in the background (a singleton that survives closing the
+terminal) and pairs on demand — you never launch or supervise anything.
 
-See [docs/apwcli.md](docs/apwcli.md) for usage, [docs/apwlib.md](docs/apwlib.md) for the
-library, and [docs/design/apwlib.md](docs/design/apwlib.md) for how it works and why.
+**Requirements:** macOS with the iCloud Passwords extension installed in a supported
+browser (Chrome, Brave, Edge, or Chromium).
+
+## Usage
+
+Passwords and one-time codes — these accept `--format text|json|table` (`table` default;
+`text` is TSV for piping, `json` for scripts/agents):
+
+```console
+$ apwcli pw list github.com                          # accounts for a site
+$ apwcli pw get github.com me@example.com            # the password
+$ apwcli pw save github.com me@example.com           # create/update (prompts)
+$ apwcli otp get github.com                          # one-time code
+$ apwcli pw get github.com me@example.com -o text    # just the fields, tab-separated
+```
+
+Daemon and pairing:
+
+```console
+$ apwcli daemon status     # daemon / extension / pairing state
+$ apwcli daemon pair       # (re)pair with the macOS PIN
+$ apwcli daemon stop       # stop the daemon and its browser
+```
+
+See [docs/apwcli.md](docs/apwcli.md) for the full guide and
+[docs/design/apwlib.md](docs/design/apwlib.md) for how it works and why a browser is
+required.
 
 ## Repository layout
 
@@ -51,12 +77,12 @@ Code changes must ship with matching doc updates, and implementation decisions b
 ## Common commands
 
 ```console
-$ uv run apwcli greet world      # run the CLI
-$ uv run pytest                  # run all tests
-$ uv run ruff format .           # format
-$ uv run ruff check --fix .      # lint and autofix
-$ uv run ty check                # typecheck
-$ uv build --all-packages        # build both wheels/sdists into dist/
+$ uv run apwcli pw list github.com   # run the CLI
+$ uv run pytest                      # run all tests
+$ uv run ruff format .               # format
+$ uv run ruff check --fix .          # lint and autofix
+$ uv run ty check                    # typecheck
+$ uv build --all-packages            # build both wheels/sdists into dist/
 ```
 
 After an intentional behavior change, refresh doc example outputs with
