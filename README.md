@@ -19,10 +19,10 @@ Read passwords and one-time codes, save logins, script it all.
 ---
 
 - **Passwords & one-time codes** — read, save, and update Apple Passwords entries
-- ✨ **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
+- **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
 - **Safe by default** — passwords are masked on screen; `-c` copies to the clipboard instead
 - **Scriptable** — JSON/TSV output everywhere; Python API via [`apwlib`](packages/apwlib)
-- **Zero babysitting** — a background daemon auto-starts on first use and pairs on demand
+- **Zero setup** — a background daemon auto-starts on first use and pairs on demand
 
 ## Install
 
@@ -38,11 +38,14 @@ browser (Chrome, Brave, Edge, or Chromium).
 ## Quick start
 
 ```sh
-apwcli daemon pair                       # once: enter the PIN macOS shows
 apwcli pw list github.com                # accounts saved for a site
 apwcli pw get github.com me@example.com  # the password (masked on screen)
 apwcli otp get github.com                # current one-time code
 ```
+
+The first command sets everything up: it starts the daemon and, if needed,
+pairs — macOS shows a 6-digit PIN, apwcli prompts for it, and you're set for
+as long as the daemon runs.
 
 ## Commands
 
@@ -84,14 +87,14 @@ and print `error: …` to stderr, or a JSON object with `-o json`.
 
 ### Daemon & pairing
 
-Commands auto-start a background daemon on first use — you never launch or
-supervise anything. Pairing asks for a 6-digit PIN that macOS displays; it
-lasts for the daemon's lifetime, so keeping the daemon running keeps the PIN
-rare.
+Commands auto-start a background daemon on first use and pair on demand — an
+unpaired command pops the macOS PIN dialog and prompts for the code, so you
+never launch or supervise anything. A pairing lasts for the daemon's
+lifetime; keeping the daemon running keeps the PIN rare.
 
 ```sh
 apwcli daemon status    # daemon / extension / pairing state
-apwcli daemon pair      # (re)pair with the macOS PIN
+apwcli daemon pair      # pair explicitly; --pin 123456 to skip the prompt
 apwcli daemon stop      # stop the daemon and its browser
 ```
 

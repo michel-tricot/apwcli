@@ -20,7 +20,7 @@ instance around and call it whenever you need a credential.
 ## Install
 
 ```sh
-pip install apwlib
+pip install apwlib    # or: uv add apwlib
 ```
 
 Requires macOS with the iCloud Passwords extension installed in a supported
