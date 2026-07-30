@@ -17,46 +17,75 @@ illustrative and are *not* executed by the test suite.
                     └── SIGKILL: the helper only accepts a notarized browser as its parent
 ```
 
-Apple ships a native binary that brokers keychain access for third-party
-browsers — a Chrome **native-messaging host** (stdio):
+## The helper
+
+Apple brokers keychain access for third-party browsers through one native
+binary, the **browser-extension helper**:
 
 ```
 /System/Cryptexes/App/System/Library/CoreServices/
   PasswordManagerBrowserExtensionHelper.app/Contents/MacOS/PasswordManagerBrowserExtensionHelper
 ```
 
-It is entitled for the shared keychain and its bundle owns the 6-digit PIN
-dialog. It's registered for Chrome and Firefox via manifests like
-`/Library/Google/Chrome/NativeMessagingHosts/com.apple.passwordmanager.json`
-(Safari reaches passwords directly and doesn't use it).
+It is entitled for the shared keychain, and its bundle owns the 6-digit PIN
+dialog. Chrome-family browsers and Firefox go through it; Safari reaches
+passwords directly and doesn't use it.
 
-The catch: the helper carries a **kernel-enforced parent launch constraint**.
-Its immediate parent must be a notarized browser from a fixed allow-list
-(Chrome, Brave, Edge, Firefox, Arc, Vivaldi, Opera, ungoogled-chromium, Zen, …)
-or carry Apple's web-browser entitlement. Spawn it from anything else and it's
-`SIGKILL`ed before a byte moves.
+## The wire: Chrome native messaging
 
-**Consequence:** the only sanctioned path to the helper is *inside* an approved
-browser running the real **iCloud Passwords extension** — which is also where
-Apple's crypto lives. The extension is the engine; anything we build is
-transport around it.
+The helper is a Chrome **native-messaging host**, registered via manifests
+like `/Library/Google/Chrome/NativeMessagingHosts/com.apple.passwordmanager.json`
+(which also name the extension IDs allowed to connect). Communication is the
+standard native-messaging exchange:
 
-## Pairing, transport, and encryption
+1. The iCloud Passwords extension's background service worker opens the port
+   (`chrome.runtime.connectNative`) and keeps it in a global,
+   `g_nativeAppPort`.
+2. The **browser** spawns the helper as a child process and wires the port to
+   the helper's stdin/stdout.
+3. Each message, in either direction, is a **4-byte little-endian length
+   followed by that many bytes of UTF-8 JSON**: requests are `postMessage`
+   calls on the port, replies arrive via `port.onMessage`.
 
-```
-  extension  ──native messaging──▶  helper        4-byte LE length + UTF-8 JSON,
-             ◀─────────────────────                over the helper's stdin/stdout
+That stdio pipe between extension and helper is the *only* channel. There is
+no socket and no XPC — from outside the browser there is nothing to connect
+to.
 
-  1. SRP-6a pairing (RFC 5054, 3072-bit, SHA-256), a 4-message PAKE:
-       MSG0/MSG1  identity + public values
-       MSG2       helper returns salt + its public value AND shows a 6-digit PIN
-       MSG3       client proves knowledge of the PIN (M1); helper confirms (HAMK)
-     The PIN is the SRP password; the session key is derived from it.
+## Why it must run inside a browser
 
-  2. Per command, the plaintext body is encrypted into an SMSG with the session
-     key (AES-128-GCM): envelope { TID, SDATA }; IV appended client→helper,
-     prepended helper→client.
-```
+The helper carries a **kernel-enforced parent launch constraint**: its
+immediate parent must be a notarized browser from a fixed allow-list
+(Chrome, Brave, Edge, Firefox, Arc, Vivaldi, Opera, ungoogled-chromium,
+Zen, …) or carry Apple's web-browser entitlement. Spawn it from anything else
+and it's `SIGKILL`ed before a byte moves.
+
+**Consequence:** the only sanctioned path to the helper is *inside* an
+approved browser running the real **iCloud Passwords extension** — which is
+also where Apple's crypto lives. The extension is the engine; anything we
+build is transport around it.
+
+> **Why a headless browser?** Since an approved browser is the only allowed
+> parent for the helper and the only host for the extension, apwlib has to
+> run one — but it's pure plumbing, nothing is ever browsed in it. So the
+> daemon launches it **headless**: no window on screen, running unattended in
+> the background for the daemon's lifetime.
+
+## Pairing and encryption
+
+Before the helper answers anything, the extension must pair with it; every
+command after that is encrypted with the session key the pairing produced.
+
+1. **SRP-6a pairing** (RFC 5054, 3072-bit group, SHA-256) — a 4-message PAKE
+   over the port:
+   - `MSG0`/`MSG1` — identity + public values
+   - `MSG2` — helper returns salt + its public value **and shows a 6-digit PIN**
+   - `MSG3` — client proves knowledge of the PIN (`M1`); helper confirms
+     (`HAMK`)
+
+   The PIN is the SRP password; the session key is derived from it.
+2. **Per command**, the plaintext body is encrypted into an `SMSG` with the
+   session key (AES-128-GCM): envelope `{ TID, SDATA }`; IV appended
+   client→helper, prepended helper→client.
 
 Two pairing properties drive the whole design:
 
