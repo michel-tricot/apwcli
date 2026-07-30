@@ -1,0 +1,26 @@
+/* Default style for the pairing PIN window.
+ *
+ * To restyle it, drop a replacement at ~/.apwlib/pinwindow.css or pass CSS text
+ * to apwlib.pinwindow.request_pin(css=...). The page structure is: <main> with
+ * .icon, <h1>, .boxes (six <input>s), p.hint, and p.ok (shown when body has the
+ * `done` class after the code is submitted).
+ */
+:root { color-scheme: light dark; }
+body {
+  margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+  font: 13px -apple-system, system-ui, sans-serif; background: Canvas; color: CanvasText;
+}
+main { text-align: center; padding: 24px; }
+.icon { font-size: 34px; }
+h1 { font-size: 15px; margin: 10px 0 16px; }
+.boxes { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
+.boxes input {
+  width: 34px; height: 44px; font-size: 22px; text-align: center;
+  border: 1.5px solid color-mix(in srgb, CanvasText 30%, transparent);
+  border-radius: 8px; background: transparent; color: inherit;
+}
+.boxes input:focus { outline: none; border-color: #0a84ff; }
+p { color: color-mix(in srgb, CanvasText 60%, transparent); max-width: 280px; margin: 0 auto; }
+.done .boxes, .done p.hint { display: none; }
+p.ok { display: none; }
+.done p.ok { display: block; }

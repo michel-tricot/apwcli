@@ -177,3 +177,23 @@ def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["pw", "list", "github.com"])
     assert result.exit_code == 9
     assert "apwcli daemon pair" in result.stderr
+
+
+def test_prompt_pin_uses_window_without_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from apwcli.cli import _prompt_pin
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr("apwlib.pinwindow.request_pin", lambda: "654321")
+    assert _prompt_pin() == "654321"
+
+
+def test_prompt_pin_uses_terminal_with_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from apwcli.cli import _prompt_pin
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("typer.prompt", lambda _msg: "111222")
+    assert _prompt_pin() == "111222"

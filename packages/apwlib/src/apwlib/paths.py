@@ -15,6 +15,7 @@ EXTENSION_DIR = DATA_DIR / "extension"
 BROWSER_PROFILE_DIR = DATA_DIR / "browser"
 LOCK_PATH = DATA_DIR / "daemon.lock"
 LOG_PATH = DATA_DIR / "daemon.log"
+PIN_STYLE_PATH = DATA_DIR / "pinwindow.css"  # optional user override for the PIN window style
 
 # Apple's native-messaging manifest, installed by macOS for Chromium browsers. We copy it
 # into our managed browser profile so the loaded extension can reach the helper.

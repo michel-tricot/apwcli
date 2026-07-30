@@ -1,7 +1,9 @@
 """Discover installed, launch-constraint-approved browsers and the extension source.
 
-Only Chromium-family browsers are supported as managed hosts, since we load the extension
-as an unpacked Chrome extension over the DevTools protocol.
+Shared by the daemon (which manages a headless browser) and the PIN window (which
+opens an app-mode window). Only Chromium-family browsers are supported as managed
+hosts, since we load the extension as an unpacked Chrome extension over the
+DevTools protocol.
 """
 
 from __future__ import annotations

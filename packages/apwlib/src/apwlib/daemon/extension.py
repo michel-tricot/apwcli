@@ -6,8 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
+from apwlib.browsers import find_extension_source
 from apwlib.daemon.bridge import BRIDGE_JS
-from apwlib.daemon.browsers import find_extension_source
 from apwlib.errors import ApwError
 from apwlib.paths import EXTENSION_DIR, ensure_data_dir
 from apwlib.protocol import Status

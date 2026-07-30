@@ -15,7 +15,9 @@ installed version.
 
 Nothing to launch: any command auto-starts the managed daemon, and the first
 data command pairs for you (pops the macOS PIN dialog and prompts for the
-code). To pair explicitly:
+code). When stdin is not a terminal — scripts, agents, GUI apps — the prompt
+is replaced by a small PIN window on screen; if the window is closed or
+nobody answers, the command fails with status `9`. To pair explicitly:
 
 ```console
 $ apwcli daemon pair

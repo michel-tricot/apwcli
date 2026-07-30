@@ -89,8 +89,10 @@ and print `error: …` to stderr, or a JSON object with `-o json`.
 
 Commands auto-start a background daemon on first use and pair on demand — an
 unpaired command pops the macOS PIN dialog and prompts for the code, so you
-never launch or supervise anything. A pairing lasts for the daemon's
-lifetime; keeping the daemon running keeps the PIN rare.
+never launch or supervise anything. Without a terminal (scripts, agents, GUI
+apps), the prompt becomes a small on-screen PIN window instead. A pairing
+lasts for the daemon's lifetime; keeping the daemon running keeps the PIN
+rare.
 
 ```sh
 apwcli daemon status    # daemon / extension / pairing state

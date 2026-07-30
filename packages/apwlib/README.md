@@ -82,6 +82,23 @@ pw.daemon.wait_until_paired()
 outlive the daemon (the helper issues a fresh PIN per handshake by design), so
 keeping the daemon alive is what keeps the PIN rare.
 
+No terminal to prompt in? `apwlib.pinwindow.request_pin` is a ready-made
+`pin_provider` that collects the PIN in a small on-screen window (six code
+boxes, opened chromeless in an installed browser) — it's what `apwcli` uses
+when stdin is not a TTY:
+
+```python
+# needs a running daemon, so this block is not executed
+from apwlib import ApplePasswords
+from apwlib.pinwindow import request_pin
+
+pw = ApplePasswords(pin_provider=request_pin)
+```
+
+The window is a plain HTML page with a bundled default stylesheet. Restyle it
+by passing CSS text (`pin_provider=lambda: request_pin(css=...)`) or by
+dropping a replacement at `~/.apwlib/pinwindow.css`.
+
 ## Data model
 
 Reads return dataclasses (`PasswordEntry`, `OTPEntry`). Their shape, without a

@@ -13,8 +13,8 @@ from typing import Annotated, Any, NoReturn
 
 import typer
 from apwlib import ApplePasswords, ApwError, NotPairedError, Status
+from apwlib.browsers import BROWSERS, installed_browsers
 from apwlib.config import read_config, write_config
-from apwlib.daemon import BROWSERS, installed_browsers
 from rich import box
 from rich.console import Console
 from rich.table import Table
@@ -54,10 +54,15 @@ def _root(
 
 
 def _prompt_pin() -> str:
-    return typer.prompt("Enter the PIN shown by macOS")
+    if sys.stdin.isatty():
+        return typer.prompt("Enter the PIN shown by macOS")
+    from apwlib.pinwindow import request_pin  # no TTY: collect the PIN in a small window
+
+    return request_pin()
 
 
-# An unpaired command auto-pairs: it pops the macOS PIN dialog and prompts for the code.
+# An unpaired command auto-pairs: it pops the macOS PIN dialog and collects the code
+# from the terminal — or, without a TTY, from a small on-screen PIN window.
 client = ApplePasswords(pin_provider=_prompt_pin)
 
 
@@ -188,7 +193,8 @@ def daemon_start(
         write_config({"browser": browser.lower()})
 
     if foreground:
-        from apwlib.daemon import resolve_browser, run
+        from apwlib.browsers import resolve_browser
+        from apwlib.daemon import run
 
         chosen = resolve_browser(browser or read_config().get("browser"))
         if chosen is None:
@@ -228,7 +234,7 @@ def daemon_pair(
     """Pair with Apple Passwords using the macOS PIN."""
     try:
         client.daemon.request_challenge()
-        code = pin or typer.prompt("Enter the PIN shown by macOS")
+        code = pin or _prompt_pin()
         client.daemon.verify_challenge(code)
         paired = client.daemon.wait_until_paired()
     except ApwError as exc:

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import websockets
 
-from apwlib.daemon.browsers import Browser
+from apwlib.browsers import Browser
 from apwlib.daemon.cdp import load_unpacked_extension
 from apwlib.daemon.extension import build_extension
 from apwlib.paths import (

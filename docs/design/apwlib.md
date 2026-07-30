@@ -158,10 +158,15 @@ models.py       PasswordEntry, OTPEntry
 errors.py       ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired)
 config.py       read/write ~/.apwlib/config.json
 paths.py        ~/.apwlib locations (socket, lock, extension dir, browser profile)
+browsers.py     discover installed approved browsers + the installed extension source
+                  (shared by daemon/ and pinwindow/)
+pinwindow/
+  __init__.py   request_pin — no-TTY pin_provider (PIN-entry window)
+  page.html     the six-box code page
+  default.css   default stylesheet (overridden by ~/.apwlib/pinwindow.css or css=)
 daemon/
   __main__.py   `python -m apwlib.daemon` entry point
   server.py     owns the browser; WebSocket bridge + unix-socket servers; singleton lock
-  browsers.py   discover installed approved browsers + the installed extension source
   extension.py  build a modified extension copy with bridge.js + local config injected
   bridge.js     JavaScript bridge appended to the extension's background worker
   bridge.py     loads bridge.js
@@ -198,8 +203,22 @@ alive to make the PIN rare.
 
 The facade takes an optional `pin_provider`. On an `unpaired` response it pairs
 transparently — triggers the challenge (macOS shows the PIN), calls
-`pin_provider()`, waits until paired, and retries the request. The CLI supplies
-a terminal prompt; without a provider, an unpaired call raises `NotPairedError`.
+`pin_provider()`, waits until paired, and retries the request. Without a
+provider, an unpaired call raises `NotPairedError`.
+
+For callers without a terminal, `apwlib.pinwindow.request_pin` is a bundled
+`pin_provider` that pops a dialog-sized PIN window: a localhost-only,
+single-use HTTP server serves a six-box code page (`page.html`), opened
+via an installed browser binary in chromeless `--app` mode with a throwaway
+profile — preferring the browser the user is actually running. Anyone who can
+read the macOS PIN dialog is at the screen, so an on-screen window is always
+answerable when pairing is possible at all. The page posts the PIN back
+(or an empty PIN from a close beacon, so a dismissed window fails fast);
+launch failure, cancellation, or timeout surface as `NotPairedError`
+(exit code 9). Styling is a stylesheet served at `/style.css`, resolved as:
+`css=` argument → user override at `~/.apwlib/pinwindow.css` → bundled
+`default.css`. The CLI prompts in the terminal on a TTY and falls back to
+this window otherwise.
 
 ## The bridge
 
@@ -249,6 +268,7 @@ class OTPEntry:
 | Facade API | Sync | The client talks to a local socket with line framing; trivially synchronous and easy from a CLI. |
 | Runtime | Auto-managed singleton daemon | Owns the browser and the in-memory session; auto-starts detached and is reused, so the PIN is entered once per daemon lifetime. |
 | CLI secrets | Mask in tables, clipboard opt-in | Passwords otherwise land in terminal scrollback. `text`/`json` (pipe targets) stay unmasked; `-c` routes the value via `pbcopy`, never stdout. |
+| No-TTY pairing | App-mode PIN window | The PIN must be typed by a human at the screen. A chromeless `--app` window of the managed browser looks like a native dialog and adds no dependency; PyObjC (heavy) and osascript (crude) lost. |
 | MCP scope | No plaintext passwords by default | MCP tool results are sent to the model provider. `list_accounts`/`get_otp`/`save_password` are safe; `get_password` is gated behind `--allow-passwords`. |
 | Dependencies | `websockets` (lib), `typer`/`rich`/`fastmcp` (CLI) | The daemon needs a WebSocket server (bridge) and client (CDP); no crypto dependency. |
 | Platform | macOS 14+, Python ≥ 3.11 | The helper, extension, and PIN flow are macOS-only; a non-macOS spawn fails with a clear error. |
