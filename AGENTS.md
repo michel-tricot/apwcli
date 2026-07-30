@@ -6,10 +6,10 @@ This is a uv workspace with two publishable packages:
   this package's manifest; its code is in `src/apwcli`, tests in `tests/`. The CLI
   is the `src/apwcli/cli/` package — `common.py` holds the shared Typer apps and
   helpers, and each command group has its own module (`passwords.py`, `otp.py`,
-  `daemon.py`, `skills.py`, `mcp.py`, plus the top-level `doctor.py`) — mirroring
-  bearcli's layout. `_clipboard.py` is the detached clipboard-auto-clear helper.
-  The MCP server lives in `src/apwcli/mcpserver.py`, and the bundled agent skill
-  (shipped as package data) in `src/apwcli/skills/`.
+  `daemon.py`, `skills.py`, `mcp.py`, plus the top-level `doctor.py`).
+  `_clipboard.py` is the detached clipboard-auto-clear helper. The MCP server
+  lives in `src/apwcli/mcpserver.py`, and the bundled agent skill (shipped as
+  package data) in `src/apwcli/skills/`.
 - `packages/apwlib` — the core library; `apwcli` depends on it via a workspace source.
 
 The top-level `pyproject.toml` also holds the dev dependency group and ALL tool
