@@ -118,11 +118,70 @@ def test_pw_get_clipboard_copies_without_printing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
     )
-    result = runner.invoke(app, ["pw", "get", "github.com", "-c"])
+    result = runner.invoke(app, ["pw", "get", "github.com", "-c", "--clear-after", "0"])
     assert result.exit_code == 0
     assert copied == [b"hunter2"]
     assert "hunter2" not in result.stdout
     assert "clipboard" in result.stdout
+
+
+def test_pw_get_clipboard_schedules_auto_clear(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
+    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
+    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, **_k: None)
+    scheduled: list[tuple[bytes, float]] = []
+    monkeypatch.setattr(
+        "apwcli.cli.common._schedule_clipboard_clear",
+        lambda data, secs: scheduled.append((data, secs)),
+    )
+    result = runner.invoke(app, ["pw", "get", "github.com", "-c"])  # default clear-after
+    assert result.exit_code == 0
+    assert scheduled == [(b"hunter2", 20)]
+    assert "clears in 20s" in result.stdout
+
+
+def test_clipboard_clear_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import PasswordEntry
+
+    entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
+    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
+    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, **_k: None)
+    scheduled: list = []
+    monkeypatch.setattr(
+        "apwcli.cli.common._schedule_clipboard_clear", lambda *a: scheduled.append(a)
+    )
+    result = runner.invoke(app, ["pw", "get", "github.com", "-c", "--clear-after", "0"])
+    assert result.exit_code == 0
+    assert scheduled == []
+    assert "clears in" not in result.stdout
+
+
+def test_pw_generate_saves_and_shows(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        "apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw))
+    )
+    result = runner.invoke(
+        app, ["pw", "generate", "example.com", "me@example.com", "-n", "24", "--show"]
+    )
+    assert result.exit_code == 0
+    assert len(saved) == 1 and saved[0][:2] == ("example.com", "me@example.com")
+    generated = saved[0][2]
+    assert len(generated) == 24
+    assert generated in result.stdout  # --show reveals it
+
+
+def test_pw_generate_does_not_show_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: list = []
+    monkeypatch.setattr(
+        "apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw))
+    )
+    result = runner.invoke(app, ["pw", "generate", "example.com", "me@example.com"])
+    assert result.exit_code == 0
+    assert saved[0][2] not in result.stdout  # saved, not printed
+    assert "not shown" in result.stdout
 
 
 def test_pw_get_clipboard_refuses_multiple_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +206,7 @@ def test_otp_get_clipboard_copies_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
     )
-    result = runner.invoke(app, ["otp", "get", "github.com", "-c"])
+    result = runner.invoke(app, ["otp", "get", "github.com", "-c", "--clear-after", "0"])
     assert result.exit_code == 0
     assert copied == [b"123456"]
 
@@ -213,3 +272,42 @@ def test_prompt_pin_uses_terminal_with_tty(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("typer.prompt", lambda _msg: "111222")
     assert _prompt_pin() == "111222"
+
+
+def test_generate_password_properties() -> None:
+    import re
+
+    from apwcli.cli.passwords import _generate_password
+
+    pw = _generate_password(30, symbols=True)
+    assert len(pw) == 30
+    assert re.search(r"[a-z]", pw) and re.search(r"[A-Z]", pw)
+    assert re.search(r"[0-9]", pw) and re.search(r"[^A-Za-z0-9]", pw)
+
+    plain = _generate_password(16, symbols=False)
+    assert len(plain) == 16 and plain.isalnum()
+
+    # Two draws should differ (CSPRNG); vanishingly unlikely to collide.
+    assert _generate_password(24, True) != _generate_password(24, True)
+
+
+def test_clipboard_helper_clears_only_when_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwcli import _clipboard
+
+    calls: list = []
+
+    class _Result:
+        def __init__(self, out: bytes) -> None:
+            self.stdout = out
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs.get("input")))
+        return _Result(b"secret") if argv == ["pbpaste"] else _Result(b"")
+
+    monkeypatch.setattr(_clipboard.subprocess, "run", fake_run)
+    assert _clipboard.clear_if_unchanged(b"secret") is True
+    assert (["pbcopy"], b"") in calls  # cleared with empty input
+
+    calls.clear()
+    monkeypatch.setattr(_clipboard.subprocess, "run", lambda argv, **k: _Result(b"different"))
+    assert _clipboard.clear_if_unchanged(b"secret") is False

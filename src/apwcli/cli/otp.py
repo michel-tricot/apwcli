@@ -5,7 +5,17 @@ from __future__ import annotations
 import typer
 from apwlib import ApwError
 
-from apwcli.cli.common import Format, FormatOption, client, copy_secret, emit, fail, otp_app
+from apwcli.cli.common import (
+    CLIPBOARD_CLEAR_SECONDS,
+    ClearAfterOption,
+    Format,
+    FormatOption,
+    client,
+    copy_secret,
+    emit,
+    fail,
+    otp_app,
+)
 
 
 @otp_app.command("get")
@@ -15,6 +25,7 @@ def otp_get(
     clipboard: bool = typer.Option(
         False, "--clipboard", "-c", help="Copy the code to the clipboard, print nothing."
     ),
+    clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
 ) -> None:
     """Get a one-time code for a URL."""
     try:
@@ -22,7 +33,7 @@ def otp_get(
     except ApwError as exc:
         fail(exc, fmt)
     if clipboard:
-        copy_secret([(e.username, e.code) for e in entries], "one-time code")
+        copy_secret([(e.username, e.code) for e in entries], "one-time code", clear_after)
         return
     emit(entries, fmt)
 

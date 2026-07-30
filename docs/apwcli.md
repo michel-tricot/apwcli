@@ -25,6 +25,20 @@ Enter the PIN shown by macOS: 123456
 ● paired
 ```
 
+If anything misbehaves, `apwcli doctor` checks the whole chain and points at the
+fix:
+
+```console
+$ apwcli doctor
+● platform    macOS
+● browser     Brave, Google Chrome
+● native host found
+● extension   v3.3.0_0
+● daemon      running
+● bridge      connected
+● pairing     paired
+```
+
 ## Passwords
 
 ```console
@@ -34,12 +48,16 @@ $ apwcli pw get github.com me@example.com --show   # reveal in the table
 $ apwcli pw get github.com me@example.com -c   # copy to clipboard, print nothing
 $ apwcli pw save github.com me@example.com     # create/update (prompts)
 $ printf 'correct horse' | apwcli pw save example.com me@example.com  # piped: reads stdin
+$ apwcli pw generate github.com me@example.com # make a strong password and save it
+$ apwcli pw generate github.com me@example.com -n 32 --no-symbols  # 32 chars, alnum only
 ```
 
 Tables mask passwords (`••••••••`) so they stay out of terminal scrollback;
 `--show` reveals them, and `text`/`json` output always carries the real values.
 `-c` requires the match to be unique — narrow with a username if a site has
-several accounts.
+several accounts, and copies are cleared from the clipboard after 20s
+(`--clear-after N`, `0` to keep). `pw generate` saves the new password without
+printing it; add `--show` to reveal it or `-c` to copy it.
 
 ## One-time codes
 
@@ -79,9 +97,13 @@ $ apwcli daemon status
 $ apwcli daemon pair             # (re)pair; --pin 123456 to skip the prompt
 $ apwcli daemon stop             # stop the daemon and its browser
 $ apwcli daemon restart          # replace a wedged daemon with a fresh one
+$ apwcli daemon logs             # tail the log; -f to follow, --clear to wipe it
 $ apwcli daemon start            # pre-warm; --foreground to run attached,
                                  # --browser to pick one (auto, chromium, chrome, brave, edge)
 ```
+
+The log lives at `~/.apwlib/daemon.log` (records lifecycle and errors only, never
+plaintext secrets) and is rotated to `daemon.log.1` once it passes ~1 MB.
 
 The daemon runs detached and survives closing the terminal. If it ever wedges
 (running, but `extension disconnected` — e.g. its browser was killed),

@@ -157,8 +157,33 @@ def fail(exc: ApwError, fmt: Format | None = None) -> NoReturn:
     raise typer.Exit(code=int(exc.status))
 
 
-def copy_secret(candidates: list[tuple[str, str | None]], what: str) -> None:
-    """Copy a single secret to the macOS clipboard, refusing ambiguity."""
+CLIPBOARD_CLEAR_SECONDS = 20  # default lifetime of a secret on the clipboard
+
+
+def _schedule_clipboard_clear(data: bytes, seconds: float) -> None:
+    """Spawn a detached helper that clears the clipboard after ``seconds`` (if unchanged)."""
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "apwcli._clipboard", str(seconds)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,  # outlive this process
+    )
+    if proc.stdin is not None:
+        proc.stdin.write(data)  # over stdin, never argv/env (which show up in `ps`)
+        proc.stdin.close()
+
+
+def copy_secret(
+    candidates: list[tuple[str, str | None]],
+    what: str,
+    clear_after: float = CLIPBOARD_CLEAR_SECONDS,
+) -> None:
+    """Copy a single secret to the macOS clipboard, refusing ambiguity.
+
+    Unless ``clear_after`` is 0, the clipboard is wiped after that many seconds (only if
+    it still holds the copied value), so a password doesn't linger indefinitely.
+    """
     found = [(user, value) for user, value in candidates if value]
     if not found:
         fail(ApwError(Status.NO_RESULTS, f"no {what} to copy"))
@@ -166,5 +191,19 @@ def copy_secret(candidates: list[tuple[str, str | None]], what: str) -> None:
         users = ", ".join(user for user, _ in found)
         fail(ApwError(Status.INVALID_PARAM, f"multiple matches ({users}) — narrow by username"))
     username, secret = found[0]
-    subprocess.run(["pbcopy"], input=secret.encode(), check=True)
-    status_line(f"copied {what} for {username} to the clipboard")
+    data = secret.encode()
+    subprocess.run(["pbcopy"], input=data, check=True)
+    message = f"copied {what} for {username} to the clipboard"
+    if clear_after and clear_after > 0:
+        _schedule_clipboard_clear(data, clear_after)
+        message += f" (clears in {int(clear_after)}s)"
+    status_line(message)
+
+
+ClearAfterOption = Annotated[
+    int,
+    typer.Option(
+        "--clear-after",
+        help=f"Seconds before the clipboard is cleared ({CLIPBOARD_CLEAR_SECONDS}; 0 to keep).",
+    ),
+]

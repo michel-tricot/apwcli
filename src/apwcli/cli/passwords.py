@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import secrets
+import string
 import sys
 
 import typer
 from apwlib import ApwError
 
 from apwcli.cli.common import (
+    CLIPBOARD_CLEAR_SECONDS,
+    ClearAfterOption,
     Format,
     FormatOption,
     client,
@@ -17,6 +21,21 @@ from apwcli.cli.common import (
     pw_app,
     status_line,
 )
+
+# Symbols kept shell- and site-safe (no quotes, backslash, or space).
+_SYMBOLS = "!@#$%^&*()-_=+[]{}"
+
+
+def _generate_password(length: int, symbols: bool) -> str:
+    """A random password with at least one char from each enabled class (CSPRNG)."""
+    classes = [string.ascii_lowercase, string.ascii_uppercase, string.digits]
+    if symbols:
+        classes.append(_SYMBOLS)
+    alphabet = "".join(classes)
+    chars = [secrets.choice(c) for c in classes]  # guarantee one of each class
+    chars += [secrets.choice(alphabet) for _ in range(length - len(chars))]
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 @pw_app.command("list")
@@ -37,6 +56,7 @@ def pw_get(
     clipboard: bool = typer.Option(
         False, "--clipboard", "-c", help="Copy the password to the clipboard, print nothing."
     ),
+    clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
 ) -> None:
     """Get password(s) for a URL."""
     try:
@@ -44,7 +64,7 @@ def pw_get(
     except ApwError as exc:
         fail(exc, fmt)
     if clipboard:
-        copy_secret([(e.username, e.password) for e in entries], "password")
+        copy_secret([(e.username, e.password) for e in entries], "password", clear_after)
         return
     emit(entries, fmt, reveal=show)
 
@@ -67,3 +87,30 @@ def pw_save(
     except ApwError as exc:
         fail(exc)
     status_line("saved")
+
+
+@pw_app.command("generate")
+def pw_generate(
+    url: str,
+    username: str,
+    length: int = typer.Option(20, "--length", "-n", min=8, help="Password length."),
+    symbols: bool = typer.Option(True, "--symbols/--no-symbols", help="Include symbols."),
+    show: bool = typer.Option(False, "--show", help="Print the generated password."),
+    clipboard: bool = typer.Option(
+        False, "--clipboard", "-c", help="Copy the password to the clipboard instead of saving it."
+    ),
+    clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
+) -> None:
+    """Generate a strong password, save it, and (optionally) reveal or copy it."""
+    password = _generate_password(length, symbols)
+    try:
+        client.save_account(url, username, password)
+    except ApwError as exc:
+        fail(exc)
+    status_line("saved")
+    if clipboard:
+        copy_secret([(username, password)], "password", clear_after)
+    elif show:
+        typer.echo(password)
+    else:
+        status_line("password saved but not shown — use --show or -c", ok=True)

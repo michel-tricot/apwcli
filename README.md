@@ -47,6 +47,35 @@ The first command sets everything up: it starts the daemon and, if needed,
 pairs — macOS shows a 6-digit PIN, apwcli prompts for it, and you're set for
 as long as the daemon runs.
 
+Something not working? `apwcli doctor` checks the whole chain — browser,
+extension, daemon, pairing — and tells you what to fix.
+
+## Security
+
+This is a tool for your passwords, so here's exactly what it does with them:
+
+- **Nothing leaves your Mac.** apwcli talks only to Apple's local iCloud
+  Passwords helper, through the official extension running in a browser on your
+  machine. There are no servers, telemetry, or network calls of our own.
+- **Apple's crypto does the crypto.** Pairing (SRP) and per-command encryption
+  (AES-GCM) run inside the real extension; apwcli is transport around it and
+  never implements or handles key material itself.
+- **Secrets stay off your screen and out of scrollback.** Tables mask passwords
+  by default (`--show` to reveal); `text`/`json` output is unmasked for piping.
+  `-c` copies to the clipboard instead of printing, and the clipboard is
+  auto-cleared after 20s (`--clear-after`).
+- **Agents never see plaintext passwords by default.** The MCP server exposes
+  account listings, one-time codes, saving, and pairing — but not password
+  reads unless you explicitly run it with `--allow-passwords` (MCP results
+  travel to the model provider).
+- **Nothing sensitive is logged.** The daemon log records lifecycle and errors
+  only; command bodies are encrypted inside the browser and never written in
+  plaintext.
+
+Full details — the launch constraint, the pairing handshake, the threat model —
+are in the [design notes](docs/design/apwlib.md). Found a vulnerability? See
+[SECURITY.md](SECURITY.md).
+
 ## Commands
 
 ### Passwords
@@ -58,10 +87,13 @@ apwcli pw get github.com me@example.com -c    # copy to clipboard, print nothing
 apwcli pw get github.com me@example.com --show   # reveal in the table
 apwcli pw save github.com me@example.com      # create/update (prompts)
 printf '%s' "$PW" | apwcli pw save github.com me@example.com   # piped: no prompt
+apwcli pw generate github.com me@example.com  # make a strong password and save it
+apwcli pw generate github.com me@example.com -c   # …and copy it, don't print
 ```
 
 Sites match by registrable domain: `github.com`, `https://gist.github.com/x`,
-and `www.github.com` all find the same accounts.
+and `www.github.com` all find the same accounts. Clipboard copies (`-c`) are
+wiped after 20 seconds; tune it with `--clear-after` (`0` keeps them).
 
 ### One-time codes
 
@@ -95,8 +127,11 @@ lasts for the daemon's lifetime; keeping the daemon running keeps the PIN
 rare.
 
 ```sh
+apwcli doctor           # diagnose the whole setup (browser, extension, pairing)
 apwcli daemon status    # daemon / extension / pairing state
 apwcli daemon pair      # pair explicitly; --pin 123456 to skip the prompt
+apwcli daemon restart   # replace a wedged daemon with a fresh one
+apwcli daemon logs      # tail the daemon log (-f to follow, --clear to wipe)
 apwcli daemon stop      # stop the daemon and its browser
 ```
 

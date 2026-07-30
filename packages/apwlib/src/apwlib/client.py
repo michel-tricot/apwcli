@@ -29,6 +29,16 @@ _UNPAIRED = "unpaired"
 _TIMEOUT = 35.0
 _START_TIMEOUT = 45.0  # browser launch + extension load + bridge connect
 _PAIR_TIMEOUT = 20.0  # SRP round-trip after the PIN is entered
+_LOG_MAX_BYTES = 1_000_000  # rotate the daemon log once it grows past ~1 MB
+
+
+def _rotate_log() -> None:
+    """Keep one previous daemon log (``.log`` -> ``.log.1``) when it grows too large."""
+    try:
+        if LOG_PATH.exists() and LOG_PATH.stat().st_size > _LOG_MAX_BYTES:
+            LOG_PATH.replace(LOG_PATH.with_name(LOG_PATH.name + ".1"))
+    except OSError:
+        pass
 
 
 def _error(response: dict[str, Any]) -> str | None:
@@ -102,6 +112,7 @@ class _Daemon:
                 "apwlib requires macOS (the Apple Passwords helper is macOS-only)",
             )
         ensure_data_dir()
+        _rotate_log()
         log = open(LOG_PATH, "a")  # noqa: SIM115 (handed to the child; closed on our exit)
         subprocess.Popen(
             [sys.executable, "-m", "apwlib.daemon"],

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import subprocess
 import sys
 
 import typer
 from apwlib import ApwError, Status
 from apwlib.browsers import BROWSERS, installed_browsers
 from apwlib.config import read_config, write_config
+from apwlib.paths import LOG_PATH
 
 from apwcli.cli.common import _prompt_pin, client, daemon_app, fail, render_status, status_line
 
@@ -77,6 +79,30 @@ def daemon_restart() -> None:
         fail(
             ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log")
         )
+
+
+@daemon_app.command("logs")
+def daemon_logs(
+    lines: int = typer.Option(40, "--lines", "-n", help="Show the last N lines (0 for all)."),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Stream new lines (Ctrl-C to stop)."),
+    clear: bool = typer.Option(False, "--clear", help="Truncate the log and exit."),
+) -> None:
+    """Show the daemon log (~/.apwlib/daemon.log)."""
+    if clear:
+        if LOG_PATH.exists():
+            LOG_PATH.write_text("")
+        status_line("log cleared")
+        return
+    if not LOG_PATH.exists():
+        status_line("no daemon log yet", ok=False)
+        return
+    if follow:
+        with contextlib.suppress(KeyboardInterrupt):
+            subprocess.run(["tail", "-f", "-n", str(lines or 10), str(LOG_PATH)])
+        return
+    entries = LOG_PATH.read_text().splitlines()
+    for line in entries[-lines:] if lines else entries:
+        typer.echo(line)
 
 
 @daemon_app.command("pair")
