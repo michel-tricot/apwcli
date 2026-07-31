@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -19,7 +21,7 @@ from apwlib.errors import (
     error_for,
 )
 from apwlib.models import OTPEntry, PasswordEntry
-from apwlib.paths import LOG_PATH, SOCKET_PATH, ensure_data_dir
+from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
 from apwlib.protocol import Command, Status
 
 _NO_DAEMON = "daemon not running"
@@ -137,21 +139,33 @@ class _Daemon:
             time.sleep(0.3)
         return False
 
-    def _wait_stopped(self, timeout: float = 10.0) -> bool:
-        """Block until the socket refuses connections (the daemon is gone, lock released).
+    def _singleton_free(self) -> bool:
+        """True if the daemon's singleton lock can be taken (no daemon holds it)."""
+        try:
+            fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+        except OSError:
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)  # release at once; the next daemon takes it
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
 
-        A daemon mid-shutdown may still accept a connection but close it without a reply
-        (an empty, unparseable response); that means "still stopping" — keep polling until
-        the connection is refused outright, so a subsequent spawn won't lose the lock race.
+    def _wait_stopped(self, timeout: float = 10.0) -> bool:
+        """Block until the daemon has fully exited and released its singleton lock.
+
+        Keying on the lock (not the socket) matters: on shutdown the daemon closes the
+        socket first but releases the lock last, after terminating the browser. A spawn
+        in that window would lose the lock race and exit as "already running", so we wait
+        for the lock to actually free.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            try:
-                self._send_raw({"op": "status"})
-            except DaemonNotRunningError:
+            if self._singleton_free():
                 return True
-            except ValueError:
-                pass  # half-open socket during shutdown; not gone yet
             time.sleep(0.1)
         return False
 

@@ -1,6 +1,7 @@
 """Client transport: error distinction and single-retry behavior (no real daemon)."""
 
 import sys
+from pathlib import Path
 
 import pytest
 from apwlib import ApplePasswords, ApwError, DaemonNotRunningError, NotPairedError
@@ -118,3 +119,28 @@ def test_start_noop_when_bridge_healthy(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert daemon.start() is True
     assert spawned == []  # a healthy daemon is left alone
+
+
+def test_singleton_free_detects_lock_holder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fcntl
+    import os
+
+    from apwlib import client
+
+    lock = tmp_path / "daemon.lock"
+    monkeypatch.setattr(client, "LOCK_PATH", lock)
+    daemon = ApplePasswords(auto_start=False).daemon
+
+    assert daemon._singleton_free() is True  # nobody holds it
+
+    held = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        assert daemon._singleton_free() is False  # a holder blocks acquisition
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        os.close(held)
+
+    assert daemon._singleton_free() is True  # freed again

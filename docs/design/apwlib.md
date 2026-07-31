@@ -207,6 +207,12 @@ response through the same recovery, so commands self-heal instead of waiting on
 a bridge that will never come. `restart` (exposed as `apwcli daemon restart`)
 forces the stop-and-replace unconditionally.
 
+Replacing a daemon waits for the *lock* to free, not the socket: on shutdown a
+daemon closes its socket first but releases the singleton lock last (after
+terminating the browser), so a spawn triggered by the socket going away would
+lose the lock race and exit as "already running". The client polls the lock
+(a non-blocking `flock` attempt) until it can be taken before spawning.
+
 ## Pairing in the library
 
 The facade takes an optional `pin_provider`. On an `unpaired` response it pairs
