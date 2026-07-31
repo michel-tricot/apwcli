@@ -32,7 +32,7 @@ from apwlib.paths import (
     SOCKET_PATH,
     ensure_data_dir,
 )
-from apwlib.protocol import Status
+from apwlib.protocol import WIRE_NO_BRIDGE, Status
 
 REQUEST_TIMEOUT = 30.0
 
@@ -123,7 +123,7 @@ class ExtensionSession:
                 return {
                     "id": "",
                     "status": Status.INVALID_SESSION,
-                    "error": "no extension connected",
+                    "error": WIRE_NO_BRIDGE,
                 }
             request_id = secrets.token_hex(8)
             loop = asyncio.get_running_loop()

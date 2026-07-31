@@ -7,6 +7,7 @@ import enum
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from typing import Annotated, Any, NoReturn
 
 import typer
@@ -88,9 +89,9 @@ def status_line(text: str, ok: bool = True) -> None:
     typer.echo(f"{_dot(ok)} {text}")
 
 
-def render_status(st: dict[str, bool]) -> None:
+def render_status(st: Mapping[str, object]) -> None:
     """Daemon + pairing status with green/red dots."""
-    running, bridge, paired = st["running"], st["bridge"], st.get("paired", False)
+    running, bridge, paired = bool(st["running"]), bool(st["bridge"]), bool(st.get("paired"))
     daemon_txt = "running" if running else "stopped"
     ext_txt = ("connected" if bridge else "disconnected") if running else "—"
     paired_txt = ("paired" if paired else "not paired") if (running and bridge) else "—"

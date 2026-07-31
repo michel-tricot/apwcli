@@ -16,6 +16,21 @@ from apwlib.paths import LOG_PATH
 from apwcli.cli.common import _prompt_pin, client, daemon_app, fail, render_status, status_line
 
 
+def _ensure_browser_installed() -> None:
+    """Fail with an install hint unless a supported browser is present."""
+    if not installed_browsers():
+        hints = "\n".join(f"  brew install --cask {b.brew_cask}  # {b.name}" for b in BROWSERS)
+        fail(ApwError(Status.GENERIC_ERROR, f"No supported browser found. Install one:\n{hints}"))
+
+
+def _require_ready(ready: bool) -> None:
+    """Fail if the daemon didn't come up, pointing at the log."""
+    if not ready:
+        fail(
+            ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log")
+        )
+
+
 @daemon_app.command("start")
 def daemon_start(
     browser: str = typer.Option(
@@ -28,9 +43,7 @@ def daemon_start(
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
     if sys.platform != "darwin":
         fail(ApwError(Status.GENERIC_ERROR, "apwcli requires macOS"))
-    if not installed_browsers():
-        hints = "\n".join(f"  brew install --cask {b.brew_cask}  # {b.name}" for b in BROWSERS)
-        fail(ApwError(Status.GENERIC_ERROR, f"No supported browser found. Install one:\n{hints}"))
+    _ensure_browser_installed()
 
     if browser:
         write_config({"browser": browser.lower()})
@@ -48,10 +61,7 @@ def daemon_start(
 
     ready = client.daemon.start()  # spawn detached + wait for the bridge
     render_status(client.daemon.status())
-    if not ready:
-        fail(
-            ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log")
-        )
+    _require_ready(ready)
 
 
 @daemon_app.command("status")
@@ -59,6 +69,8 @@ def daemon_status() -> None:
     """Report daemon and pairing state."""
     st = client.daemon.status()
     render_status(st)
+    # render_status already showed the red dots; exit non-zero for scripts without a
+    # second, redundant `error: …` line (hence a bare Exit, not fail()).
     if not st["running"]:
         raise typer.Exit(code=int(Status.INVALID_SESSION))
 
@@ -73,12 +85,10 @@ def daemon_stop() -> None:
 @daemon_app.command("restart")
 def daemon_restart() -> None:
     """Stop any running daemon and start a fresh one (fixes a wedged daemon)."""
+    _ensure_browser_installed()  # else restart()'s spawn would raise uncaught
     ready = client.daemon.restart()
     render_status(client.daemon.status())
-    if not ready:
-        fail(
-            ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log")
-        )
+    _require_ready(ready)
 
 
 @daemon_app.command("logs")

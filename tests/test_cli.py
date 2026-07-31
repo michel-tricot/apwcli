@@ -35,6 +35,17 @@ def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "stopped" in result.stdout
 
 
+def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # restart must pre-check browsers and fail with a hint, not let _spawn raise uncaught.
+    import apwcli.cli.daemon as dm
+
+    monkeypatch.setattr(dm, "installed_browsers", lambda: [])
+    result = runner.invoke(app, ["daemon", "restart"])
+    assert result.exit_code == 1
+    assert "No supported browser found" in result.stderr
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
 def test_daemon_status_shows_daemon_and_pairing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "apwcli.cli.client.daemon.status",

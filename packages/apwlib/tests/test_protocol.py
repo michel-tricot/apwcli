@@ -54,3 +54,14 @@ def test_entries_from_no_results_is_empty() -> None:
 def test_entries_from_error_status_raises() -> None:
     with pytest.raises(ApwError):
         entries_from({"STATUS": Status.INVALID_SESSION})
+
+
+def test_bridge_js_uses_the_canonical_unpaired_marker() -> None:
+    # WIRE_UNPAIRED is produced by bridge.js (JS) and matched by the Python facade; guard
+    # the one cross-language coupling so a reword in either place is caught here.
+    from importlib.resources import files
+
+    from apwlib.protocol import WIRE_UNPAIRED
+
+    bridge = files("apwlib.daemon").joinpath("bridge.js").read_text()
+    assert f'"{WIRE_UNPAIRED}"' in bridge

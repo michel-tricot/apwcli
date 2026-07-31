@@ -12,6 +12,7 @@ import dataclasses
 from typing import Any
 
 from apwlib import ApplePasswords
+from apwlib.client import DaemonStatus
 from fastmcp import FastMCP
 
 
@@ -33,7 +34,7 @@ def build_server(allow_passwords: bool = False) -> FastMCP:
     client = ApplePasswords()
 
     @server.tool
-    def status() -> dict[str, bool]:
+    def status() -> DaemonStatus:
         """Daemon, browser-extension, and pairing state."""
         return client.daemon.status()
 

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict
 
 from apwlib import protocol
 from apwlib.errors import (
@@ -22,11 +22,20 @@ from apwlib.errors import (
 )
 from apwlib.models import OTPEntry, PasswordEntry
 from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import Command, Status
+from apwlib.protocol import WIRE_NO_BRIDGE, WIRE_UNPAIRED, Command, Status
 
-_NO_DAEMON = "daemon not running"
-_NO_BRIDGE = "no extension connected"
-_UNPAIRED = "unpaired"
+_NO_DAEMON = "daemon not running"  # local message on DaemonNotRunningError (not wire-matched)
+
+
+class DaemonStatus(TypedDict):
+    """The shape of :meth:`_Daemon.status`; keeps its two return paths in sync."""
+
+    running: bool
+    bridge: bool
+    paired: bool
+    browser: str | None
+    browser_pid: int | None
+
 
 _TIMEOUT = 35.0
 _START_TIMEOUT = 45.0  # browser launch + extension load + bridge connect
@@ -100,7 +109,7 @@ class _Daemon:
             self._wait_bridge()
             response = self._send_raw(message)  # retry once after starting
 
-        if _error(response) == _NO_BRIDGE and self._auto_start:
+        if _error(response) == WIRE_NO_BRIDGE and self._auto_start:
             self.start()  # wait for a booting bridge, or replace a wedged daemon
             response = self._send_raw(message)  # retry once after recovery
         return response
@@ -212,7 +221,7 @@ class _Daemon:
         self._spawn()
         return self._wait_bridge()
 
-    def status(self) -> dict[str, Any]:
+    def status(self) -> DaemonStatus:
         """Report daemon reachability, bridge connectivity, and pairing (does not auto-start).
 
         When running, also reports ``browser`` (the managed browser's name) and
@@ -283,11 +292,11 @@ class ApplePasswords:
     def _send(self, message: dict[str, Any]) -> dict[str, Any]:
         """Deliver a message, auto-pairing on an unpaired session when possible."""
         response = self.daemon.deliver(message)
-        if _error(response) == _UNPAIRED:
+        if _error(response) == WIRE_UNPAIRED:
             if self._pin_provider and message.get("cmd") != Command.HANDSHAKE:
                 self._pair()
                 response = self.daemon.deliver(message)  # retry once after pairing
-            if _error(response) == _UNPAIRED:
+            if _error(response) == WIRE_UNPAIRED:
                 raise NotPairedError(Status.INVALID_SESSION, "session is not paired")
         return response
 

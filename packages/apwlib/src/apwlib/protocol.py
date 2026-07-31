@@ -44,6 +44,14 @@ class Status(IntEnum):
     SERVER_ERROR = 100
 
 
+# Canonical wire error markers. The daemon and the facade both compare against these exact
+# strings to drive recovery/pairing, so they must not drift. WIRE_NO_BRIDGE is produced by
+# the daemon (server.py); WIRE_UNPAIRED is produced by the in-browser bridge (bridge.js) and
+# forwarded verbatim — its literal is mirrored there and guarded by a test.
+WIRE_NO_BRIDGE = "no extension connected"
+WIRE_UNPAIRED = "unpaired"
+
+
 def _with_scheme(url: str) -> str:
     return url if "://" in url else f"http://{url}"
 
