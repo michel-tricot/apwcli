@@ -12,7 +12,7 @@ from apwcli.cli.common import app, client, status_line
 
 
 def _line(ok: bool, label: str, detail: str, hint: str = "") -> None:
-    status_line(f"{label:11} {detail}", ok)
+    status_line(f"{label:12} {detail}", ok)
     if not ok and hint:
         typer.echo(f"  ↳ {hint}")
 
@@ -41,8 +41,8 @@ def doctor() -> None:
     manifest_ok = APPLE_NATIVE_MANIFEST.is_file()
     _line(
         manifest_ok,
-        "native host",
-        "manifest present" if manifest_ok else "manifest missing",
+        "apple helper",
+        "installed" if manifest_ok else "not installed",
         "install the iCloud Passwords extension and open that browser once",
     )
     prereqs_ok = prereqs_ok and manifest_ok

@@ -30,19 +30,19 @@ fix:
 
 ```console
 $ apwcli doctor
-● platform    macOS
-● browser     Brave, Google Chrome
-● native host manifest present
-● extension   v3.3.0_0
-● daemon      running
-● bridge      connected — Brave (pid 41911)
-● pairing     paired
+● platform     macOS
+● browser      Brave, Google Chrome
+● apple helper installed
+● extension    v3.3.0_0
+● daemon       running
+● bridge       connected — Brave (pid 41911)
+● pairing      paired
 ```
 
 The `browser` line lists the supported browsers installed; the `bridge` line
-names the one the daemon is actually running (with its pid). `native host` is
-Apple's native-messaging manifest that wires the extension to the keychain
-helper.
+names the one the daemon is actually running (with its pid). `apple helper` is
+Apple's password helper (the native-messaging integration) that lets the
+extension reach the keychain — "installed" means macOS has it wired up.
 
 ## Passwords
 
