@@ -14,7 +14,6 @@ auto-managed (first call starts it, detached and reused); with a
 `pin_provider`, pairing happens on demand too:
 
 ```python
-# needs a running daemon, so this block is not executed by the test suite
 from apwlib import ApplePasswords
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))

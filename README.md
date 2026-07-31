@@ -154,7 +154,6 @@ provider; see the [design notes](docs/design/apwlib.md)).
 [`apwlib`](packages/apwlib) is the Python API behind the CLI:
 
 ```python
-# needs a running daemon, so this block is not executed
 from apwlib import ApplePasswords
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
@@ -172,7 +171,4 @@ validation suite — format, lint, typecheck, tests:
 scripts/check.sh
 ```
 
-Python code blocks in the docs and READMEs are executed by the test suite;
-after an intentional behavior change, refresh their outputs with
-`uv run pytest tests/test_docs.py --update-examples`. Contributor and agent
-guidelines live in [AGENTS.md](AGENTS.md).
+Contributor and agent guidelines live in [AGENTS.md](AGENTS.md).

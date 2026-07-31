@@ -4,7 +4,6 @@
 Python library behind [`apwcli`](https://github.com/michel-tricot/apwcli).
 
 ```python
-# needs a running daemon, so this block is not executed
 from apwlib import ApplePasswords
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
@@ -29,7 +28,6 @@ browser (Chrome, Brave, Edge, or Chromium).
 ## Usage
 
 ```python
-# needs a running daemon, so this block is not executed
 from apwlib import ApplePasswords, ApwError, SessionError
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
@@ -69,7 +67,6 @@ Pairing needs a 6-digit PIN that macOS displays, once per daemon lifetime.
 A `pin_provider` callback handles it transparently; to drive it explicitly:
 
 ```python
-# needs a running daemon, so this block is not executed
 from apwlib import ApplePasswords
 
 pw = ApplePasswords()
@@ -88,7 +85,6 @@ boxes, opened chromeless in an installed browser) — it's what `apwcli` uses
 when stdin is not a TTY:
 
 ```python
-# needs a running daemon, so this block is not executed
 from apwlib import ApplePasswords
 from apwlib.pinwindow import request_pin
 
