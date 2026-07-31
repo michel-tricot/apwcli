@@ -144,4 +144,7 @@ opt in by configuring the client to run `apwcli mcp run --allow-passwords`.
 
 Errors print `error: …` to stderr (a JSON object with `-o json`) and the
 process exits with the protocol status code — for example `9` when the daemon
-is not running or the session is not paired, `1` on non-macOS platforms.
+is not running or the session is not paired, `1` on non-macOS platforms or when
+no supported browser is installed (any command fails immediately in that case,
+naming the browsers to install, rather than waiting on a daemon that can't
+start).

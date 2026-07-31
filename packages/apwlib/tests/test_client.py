@@ -92,6 +92,19 @@ def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch)
         pw.get_login_names("github.com")
 
 
+def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Auto-start must report "no supported browser" immediately, not spawn a daemon that
+    # dies and leave the caller waiting on a bridge that never comes.
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr("apwlib.browsers.installed_browsers", lambda: [])
+    spawned = []
+    pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
+    monkeypatch.setattr(pw.daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)
+    with pytest.raises(ApwError, match="no supported browser"):
+        pw.get_login_names("github.com")
+    assert spawned == []  # failed before launching/waiting on anything
+
+
 def test_start_replaces_a_wedged_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     # A daemon that is running but whose bridge is dead must be stopped and replaced,
     # not deferred to (a fresh spawn would just lose the lock race).

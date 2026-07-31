@@ -113,6 +113,18 @@ class _Daemon:
                 Status.GENERIC_ERROR,
                 "apwlib requires macOS (the Apple Passwords helper is macOS-only)",
             )
+        # Preflight: without a browser the detached daemon would just die on startup, and the
+        # caller would wait out _wait_bridge and get a misleading "daemon not running". Fail
+        # fast here so every entry point (auto-start included) reports the real cause.
+        from apwlib.browsers import BROWSERS, installed_browsers
+
+        if not installed_browsers():
+            names = ", ".join(b.name for b in BROWSERS)
+            raise ApwError(
+                Status.GENERIC_ERROR,
+                f"no supported browser found — install one of: {names} "
+                "(e.g. `brew install --cask google-chrome`)",
+            )
         ensure_data_dir()
         _rotate_log()
         log = open(LOG_PATH, "a")  # noqa: SIM115 (handed to the child; closed on our exit)
