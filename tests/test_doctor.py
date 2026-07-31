@@ -32,13 +32,19 @@ def test_doctor_all_green(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
         browsers=[_BROWSER],
         manifest=manifest,
         source=Path("/ext/3.3.0_0"),
-        status={"running": True, "bridge": True, "paired": True},
+        status={
+            "running": True,
+            "bridge": True,
+            "paired": True,
+            "browser": "Google Chrome",
+            "browser_pid": 4242,
+        },
     )
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
-    assert "Brave" in result.stdout
     assert "v3.3.0_0" in result.stdout
     assert "paired" in result.stdout
+    assert "Google Chrome (pid 4242)" in result.stdout  # the browser hosting the bridge
 
 
 def test_doctor_fails_without_browser(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

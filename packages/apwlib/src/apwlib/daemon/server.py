@@ -146,6 +146,8 @@ async def _handle_client(
     writer: asyncio.StreamWriter,
     session: ExtensionSession,
     stop: asyncio.Future[None],
+    browser: Browser,
+    child: asyncio.subprocess.Process,
 ) -> None:
     try:
         line = await asyncio.wait_for(reader.readline(), REQUEST_TIMEOUT)
@@ -154,7 +156,13 @@ async def _handle_client(
         message = json.loads(line)
         op = message.get("op")
         if op == "status":
-            response: dict = {"running": True, "bridge": session.ready, "paired": session.paired}
+            response: dict = {
+                "running": True,
+                "bridge": session.ready,
+                "paired": session.paired,
+                "browser": browser.name,
+                "browser_pid": child.pid,
+            }
         elif op == "stop":
             response = {"stopping": True}
             if not stop.done():
@@ -260,7 +268,8 @@ async def run(browser: Browser) -> None:
         if SOCKET_PATH.exists():
             SOCKET_PATH.unlink()
         unix_server = await asyncio.start_unix_server(
-            lambda r, w: _handle_client(r, w, session, stop), path=str(SOCKET_PATH)
+            lambda r, w: _handle_client(r, w, session, stop, browser, child),
+            path=str(SOCKET_PATH),
         )
         SOCKET_PATH.chmod(0o600)
 

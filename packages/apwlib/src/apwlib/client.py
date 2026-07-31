@@ -212,16 +212,28 @@ class _Daemon:
         self._spawn()
         return self._wait_bridge()
 
-    def status(self) -> dict[str, bool]:
-        """Report daemon reachability, bridge connectivity, and pairing (does not auto-start)."""
+    def status(self) -> dict[str, Any]:
+        """Report daemon reachability, bridge connectivity, and pairing (does not auto-start).
+
+        When running, also reports ``browser`` (the managed browser's name) and
+        ``browser_pid`` (its process id); both are ``None`` otherwise.
+        """
         try:
             resp = self._send_raw({"op": "status"})
         except SessionError:
-            return {"running": False, "bridge": False, "paired": False}
+            return {
+                "running": False,
+                "bridge": False,
+                "paired": False,
+                "browser": None,
+                "browser_pid": None,
+            }
         return {
             "running": True,
             "bridge": bool(resp.get("bridge")),
             "paired": bool(resp.get("paired")),
+            "browser": resp.get("browser"),
+            "browser_pid": resp.get("browser_pid"),
         }
 
     # -- pairing primitives ----------------------------------------------------

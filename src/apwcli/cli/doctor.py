@@ -42,7 +42,7 @@ def doctor() -> None:
     _line(
         manifest_ok,
         "native host",
-        "found" if manifest_ok else "missing",
+        "manifest present" if manifest_ok else "manifest missing",
         "install the iCloud Passwords extension and open that browser once",
     )
     prereqs_ok = prereqs_ok and manifest_ok
@@ -69,12 +69,10 @@ def doctor() -> None:
         "starts automatically on the next command, or run `apwcli daemon start`",
     )
     if st["running"]:
-        _line(
-            st["bridge"],
-            "bridge",
-            "connected" if st["bridge"] else "disconnected",
-            "run `apwcli daemon restart`",
-        )
+        bridge_detail = "connected" if st["bridge"] else "disconnected"
+        if st["bridge"] and st.get("browser"):
+            bridge_detail += f" — {st['browser']} (pid {st['browser_pid']})"
+        _line(st["bridge"], "bridge", bridge_detail, "run `apwcli daemon restart`")
         _line(
             st["paired"],
             "pairing",

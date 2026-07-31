@@ -44,10 +44,10 @@ def _browser(id: str, name: str, app: str, data_subdir: str, brew_cask: str) -> 
 
 
 BROWSERS: list[Browser] = [
+    _browser("chrome", "Google Chrome", "Google Chrome", "Google/Chrome", "google-chrome"),
     _browser("chromium", "Ungoogled Chromium", "Chromium", "Chromium", "ungoogled-chromium"),
     _browser("brave", "Brave", "Brave Browser", "BraveSoftware/Brave-Browser", "brave-browser"),
     _browser("edge", "Microsoft Edge", "Microsoft Edge", "Microsoft Edge", "microsoft-edge"),
-    _browser("chrome", "Google Chrome", "Google Chrome", "Google/Chrome", "google-chrome"),
 ]
 
 

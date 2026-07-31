@@ -32,12 +32,17 @@ fix:
 $ apwcli doctor
 ● platform    macOS
 ● browser     Brave, Google Chrome
-● native host found
+● native host manifest present
 ● extension   v3.3.0_0
 ● daemon      running
-● bridge      connected
+● bridge      connected — Brave (pid 41911)
 ● pairing     paired
 ```
+
+The `browser` line lists the supported browsers installed; the `bridge` line
+names the one the daemon is actually running (with its pid). `native host` is
+Apple's native-messaging manifest that wires the extension to the keychain
+helper.
 
 ## Passwords
 
