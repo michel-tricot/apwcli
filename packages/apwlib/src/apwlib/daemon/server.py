@@ -42,8 +42,19 @@ _BROWSER_FLAGS = [
     "--headless=new",
     "--no-first-run",
     "--no-default-browser-check",
+    # Keep the extension's service worker responsive (not throttled/backgrounded).
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
+    # Trim footprint: this browser only hosts the extension worker + native port, it never
+    # renders anything. Dropping the GPU process is the big win (~270 MB -> ~37 MB of
+    # physical footprint, measured); the rest disable background subsystems we don't use.
+    "--disable-gpu",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--disable-features=Translate,MediaRouter,OptimizationHints,"
+    "InterestFeedContentSuggestions,CalculateNativeWinOcclusion",
 ]
 
 
