@@ -25,6 +25,23 @@ def test_pair_lives_under_daemon() -> None:
     assert runner.invoke(app, ["auth", "--help"]).exit_code != 0
 
 
+def test_startup_gate_requires_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")  # override the macOS-assuming fixture
+    result = runner.invoke(app, ["daemon", "status"])
+    assert result.exit_code == 1
+    assert "requires macOS" in result.stderr
+
+
+def test_help_and_version_work_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")  # eager options must bypass the gate
+    assert runner.invoke(app, ["--help"]).exit_code == 0
+    assert runner.invoke(app, ["--version"]).exit_code == 0
+
+
 def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "apwcli.cli.client.daemon.status",

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import subprocess
-import sys
 
 import typer
 from apwlib import ApwError, Status
@@ -41,8 +40,6 @@ def daemon_start(
     ),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
-    if sys.platform != "darwin":
-        fail(ApwError(Status.GENERIC_ERROR, "apwcli requires macOS"))
     _ensure_browser_installed()
 
     if browser:

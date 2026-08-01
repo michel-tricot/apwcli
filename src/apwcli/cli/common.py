@@ -49,7 +49,10 @@ def _root(
         ),
     ] = False,
 ) -> None:
-    pass
+    # One platform gate for the whole CLI: every command needs the macOS-only Apple
+    # Passwords helper. (--version/--help are eager and exit before this runs.)
+    if sys.platform != "darwin":
+        fail(ApwError(Status.GENERIC_ERROR, "apwcli requires macOS"))
 
 
 def _prompt_pin() -> str:

@@ -30,7 +30,6 @@ fix:
 
 ```console
 $ apwcli doctor
-● platform     macOS
 ● browser      Brave, Google Chrome
 ● apple helper installed
 ● extension    v3.3.0_0
