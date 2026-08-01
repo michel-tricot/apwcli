@@ -73,6 +73,7 @@ class ExtensionSession:
         self._pending: dict[str, asyncio.Future[dict]] = {}
         self._lock = asyncio.Lock()
         self._paired = False  # last pairing state reported by the bridge
+        self._pairing_state: str | None = None  # raw handshake state (NotInSession/MSG1Set/…)
 
     @property
     def ready(self) -> bool:
@@ -81,6 +82,10 @@ class ExtensionSession:
     @property
     def paired(self) -> bool:
         return self._ws is not None and self._paired
+
+    @property
+    def pairing_state(self) -> str | None:
+        return self._pairing_state if self._ws is not None else None
 
     async def serve(self, ws: websockets.ServerConnection) -> None:
         """Handle one bridge connection for its lifetime."""
@@ -103,6 +108,7 @@ class ExtensionSession:
                     continue
                 if "paired" in message:  # bridge reporting its pairing state
                     self._paired = bool(message["paired"])
+                    self._pairing_state = message.get("state")
                     continue
                 future = self._pending.pop(message.get("id"), None)
                 if future and not future.done():
@@ -160,6 +166,7 @@ async def _handle_client(
                 "running": True,
                 "bridge": session.ready,
                 "paired": session.paired,
+                "pairing_state": session.pairing_state,
                 "browser": browser.name,
                 "browser_pid": child.pid,
             }

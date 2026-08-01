@@ -170,8 +170,11 @@
   }
 
   function reportState() {
-    const paired = typeof g_theState !== "undefined" && g_theState === "SessionKeySet";
-    send({ paired: paired });
+    const state = typeof g_theState !== "undefined" ? g_theState : null;
+    // Report the raw handshake state too: it lets the client tell a collapsed handshake
+    // (back to NotInSession after a verify — e.g. a wrong PIN) from one still in progress,
+    // so it can fail fast instead of waiting out the pairing timeout.
+    send({ paired: state === "SessionKeySet", state: state });
   }
 
   function reply(message) {

@@ -35,6 +35,7 @@ class DaemonStatus(TypedDict):
     paired: bool
     browser: str | None
     browser_pid: int | None
+    pairing_state: str | None
 
 
 _TIMEOUT = 35.0
@@ -236,6 +237,7 @@ class _Daemon:
                 "paired": False,
                 "browser": None,
                 "browser_pid": None,
+                "pairing_state": None,
             }
         return {
             "running": True,
@@ -243,6 +245,7 @@ class _Daemon:
             "paired": bool(resp.get("paired")),
             "browser": resp.get("browser"),
             "browser_pid": resp.get("browser_pid"),
+            "pairing_state": resp.get("pairing_state"),
         }
 
     # -- pairing primitives ----------------------------------------------------
@@ -255,14 +258,26 @@ class _Daemon:
         self.deliver({"cmd": Command.HANDSHAKE, "pin": pin})
 
     def wait_until_paired(self, timeout: float = _PAIR_TIMEOUT) -> bool:
-        """Block until the daemon reports a paired session, or ``timeout`` elapses."""
+        """Block until the daemon reports a paired session, or the attempt fails/times out.
+
+        Fails fast on a collapsed handshake: once a handshake has been in progress and the
+        state falls back to ``NotInSession`` (e.g. the helper rejected a wrong PIN), returns
+        ``False`` immediately instead of polling until ``timeout``.
+        """
         deadline = time.monotonic() + timeout
+        saw_pending = False
         while time.monotonic() < deadline:
             try:
-                if self._send_raw({"op": "status"}).get("paired"):
-                    return True
+                resp = self._send_raw({"op": "status"})
             except DaemonNotRunningError:
                 return False
+            if resp.get("paired"):
+                return True
+            state = resp.get("pairing_state")
+            if state and state != "NotInSession":
+                saw_pending = True  # a handshake is under way
+            elif state == "NotInSession" and saw_pending:
+                return False  # it collapsed back to idle — the PIN was rejected
             time.sleep(0.2)
         return False
 

@@ -157,3 +157,25 @@ def test_singleton_free_detects_lock_holder(
         os.close(held)
 
     assert daemon._singleton_free() is True  # freed again
+
+
+def test_wait_until_paired_fails_fast_on_collapsed_handshake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A handshake in progress (MSG1Set) that falls back to NotInSession means the PIN was
+    # rejected — return False at once, not after the full timeout.
+    daemon = ApplePasswords(auto_start=False).daemon
+    responses = iter(
+        [
+            {"paired": False, "pairing_state": "MSG1Set"},
+            {"paired": False, "pairing_state": "NotInSession"},
+        ]
+    )
+    monkeypatch.setattr(daemon, "_send_raw", lambda _m: next(responses))
+    assert daemon.wait_until_paired(timeout=10) is False
+
+
+def test_wait_until_paired_true_when_paired(monkeypatch: pytest.MonkeyPatch) -> None:
+    daemon = ApplePasswords(auto_start=False).daemon
+    monkeypatch.setattr(daemon, "_send_raw", lambda _m: {"paired": True})
+    assert daemon.wait_until_paired(timeout=1) is True

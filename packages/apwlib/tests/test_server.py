@@ -76,6 +76,7 @@ class _FakeWriter:
 class _FakeSession:
     ready = True
     paired = False
+    pairing_state = "MSG1Set"
 
 
 @pytest.mark.anyio
@@ -101,6 +102,7 @@ async def test_status_reports_browser_and_pid() -> None:
     assert resp["running"] is True
     assert resp["bridge"] is True and resp["paired"] is False
     assert resp["browser"] == "Brave" and resp["browser_pid"] == 3131
+    assert resp["pairing_state"] == "MSG1Set"
 
 
 @pytest.fixture
