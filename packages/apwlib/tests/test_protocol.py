@@ -65,3 +65,13 @@ def test_bridge_js_uses_the_canonical_unpaired_marker() -> None:
 
     bridge = files("apwlib.daemon").joinpath("bridge.js").read_text()
     assert f'"{WIRE_UNPAIRED}"' in bridge
+
+
+def test_bridge_challenge_resets_any_active_session() -> None:
+    # A (re)challenge must reset from ANY active state, including SessionKeySet — else an
+    # already-paired session shows no new PIN and a wrong PIN falsely reports "paired".
+    from importlib.resources import files
+
+    bridge = files("apwlib.daemon").joinpath("bridge.js").read_text()
+    assert "g_theState !== ContextState.NotInSession" in bridge
+    assert "resetTheSession(ContextState.NotInSession)" in bridge

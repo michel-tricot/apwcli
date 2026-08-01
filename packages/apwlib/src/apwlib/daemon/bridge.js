@@ -84,14 +84,17 @@
     try {
       if (message.pin == null) {
         if (typeof ChallengePIN !== "function") return fail(message.id, SERVER_ERROR, "pairing unavailable");
-        // An abandoned handshake (challenge shown, PIN never submitted) parks the state
-        // machine mid-flight — where ChallengePIN() is a silent no-op and the PIN would
-        // never be shown again. Reset to NotInSession first so the challenge restarts.
+        // ChallengePIN() only starts a handshake from NotInSession; from any other state it
+        // is a silent no-op. So reset to NotInSession first from ANY active state — a parked
+        // mid-handshake (ChallengeSent/MSG1Set) OR an existing pairing (SessionKeySet).
+        // Resetting a live pairing matters: otherwise a re-pair shows no PIN dialog, and the
+        // stale paired=true makes a wrong PIN look like success. A fresh challenge means a
+        // wrong PIN genuinely fails.
         if (
           typeof resetTheSession === "function" &&
           typeof ContextState !== "undefined" &&
           typeof g_theState !== "undefined" &&
-          (g_theState === ContextState.ChallengeSent || g_theState === ContextState.MSG1Set)
+          g_theState !== ContextState.NotInSession
         ) {
           resetTheSession(ContextState.NotInSession);
         }
