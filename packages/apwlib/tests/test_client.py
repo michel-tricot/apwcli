@@ -96,7 +96,7 @@ def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -
     # Auto-start must report "no supported browser" immediately, not spawn a daemon that
     # dies and leave the caller waiting on a bridge that never comes.
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr("apwlib.browsers.installed_browsers", lambda: [])
+    monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
     spawned = []
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
     monkeypatch.setattr(pw.daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)

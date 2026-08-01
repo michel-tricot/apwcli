@@ -7,7 +7,7 @@ version = "0.1.0"
 description = "Command-line interface for apwlib."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = ["apwlib", "typer>=0.12", "rich>=13", "fastmcp>=3"]
 
 [project.scripts]
@@ -33,22 +33,55 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 # Markdown code blocks use pytest-examples' `#> output` convention and are
 # linted/formatted by tests/test_docs.py, not by ruff directly.
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "SIM", # flake8-simplify
-    "RUF", # ruff-specific
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific
+    "C4",    # comprehensions
+    "ASYNC", # async pitfalls
+    "S",     # bandit
+    "BLE",   # blind excepts
+    "DTZ",   # naive datetimes
+    "PTH",   # enforce pathlib
+    "N",     # naming
+    "A",     # builtin shadowing
+    "PIE",   # misc lints
+    "PERF",  # performance anti-patterns
+    "T20",   # stray prints (the daemon's log lines are opted in per-file)
+    "ISC",   # implicit string concatenation
+    "G",     # logging format
+    "ERA",   # commented-out code
+    "FURB",  # modernization
+    "RET",   # return consistency
+    "ARG",   # unused arguments
+    "PL",    # pylint subset
 ]
+ignore = [
+    "S603",    # spawning browsers/daemons is what this tool does
+    "S607",    # macOS system tools (ps, pbcopy, tail, ...) are invoked by well-known name
+    "S310",    # urlopen is only used against localhost DevTools / the Chrome store
+    "PLR0913", # handler plumbing and typer commands legitimately thread several arguments
+    "PLR0917", # same, for positional counting
+    "PLC0415", # lazy imports are deliberate: fast CLI startup, no client->daemon import
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The daemon logs to stdout/stderr by design (redirected to ~/.apwlib/daemon.log).
+"packages/apwlib/src/apwlib/daemon/**" = ["T201"]
+# Tests: asserts, magic values, fake tokens/paths, args that exist to match signatures.
+"tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
+"packages/apwlib/tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
 
 [tool.pytest.ini_options]
 testpaths = [

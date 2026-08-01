@@ -22,8 +22,9 @@ instance around and call it whenever you need a credential.
 pip install apwlib    # or: uv add apwlib
 ```
 
-Requires macOS with the iCloud Passwords extension installed in a supported
-browser (Chrome, Brave, Edge, or Chromium).
+Requires macOS with a supported browser installed (Chrome, Brave, Edge, or
+Chromium); the iCloud Passwords extension itself is downloaded automatically
+from the Chrome Web Store.
 
 ## Usage
 

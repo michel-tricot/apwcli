@@ -9,7 +9,8 @@
 //     native helper; the helper's encrypted reply is decrypted with `parseSMSG`.
 //   - it reports pairing state (`{paired}`) so the daemon can answer status queries.
 //
-// `self.APW_CONFIG` (port + token) is injected ahead of this script by extension.py.
+// `globalThis.__chauffeur_config` (port + token) is injected ahead of this script by
+// chauffeur (`ExtensionSpec.inject_config`, see extension.py).
 //
 // Hardening rules (this worker holds the SRP pairing — if it dies, the user must re-PIN):
 //   * NOTHING may throw out of an event handler. Every extension/native/WebSocket call is
@@ -23,7 +24,7 @@
 (function apwBridge() {
   "use strict";
 
-  const cfg = (self && self.APW_CONFIG) || {};
+  const cfg = (typeof globalThis !== "undefined" && globalThis.__chauffeur_config) || {};
   const port = cfg.port;
   const token = cfg.token;
 

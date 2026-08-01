@@ -20,13 +20,12 @@
 </main>
 <script>
   const boxes = [...document.querySelectorAll("input")];
-  const token = new URLSearchParams(location.search).get("token");
   let submitted = false;
   function submit() {
     submitted = true;
     const pin = boxes.map((b) => b.value).join("");
-    fetch("/pin", { method: "POST", body: JSON.stringify({ token, pin }) })
-      .then(() => document.body.classList.add("done"));
+    py_chauffeur.notify("pin", { pin });
+    document.body.classList.add("done");
   }
   boxes.forEach((box, i) => {
     box.addEventListener("input", () => {
@@ -47,7 +46,7 @@
   });
   addEventListener("pagehide", () => {
     // Window closed without a code: tell the caller not to wait for the timeout.
-    if (!submitted) navigator.sendBeacon("/pin", JSON.stringify({ token, pin: "" }));
+    if (!submitted) py_chauffeur.notify("pin", { pin: "" });
   });
   boxes[0].focus();
 </script>

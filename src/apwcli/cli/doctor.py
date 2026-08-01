@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import typer
-from apwlib.browsers import BROWSERS, find_extension_source, installed_browsers
+from apwlib.browsers import BROWSERS, installed_browsers
+from apwlib.daemon.extension import cached_extension_version
 from apwlib.paths import APPLE_NATIVE_MANIFEST
 
 from apwcli.cli.common import app, client, status_line
@@ -42,18 +43,11 @@ def doctor() -> None:
     )
     prereqs_ok = prereqs_ok and manifest_ok
 
-    # 3. The installed iCloud Passwords extension (source of the loaded copy).
-    source = find_extension_source()
-    if source is not None:
-        _line(True, "extension", f"v{source.name}")
-    else:
-        prereqs_ok = False
-        _line(
-            False,
-            "extension",
-            "not found",
-            "add iCloud Passwords from the Chrome Web Store, then open that browser once",
-        )
+    # 3. The iCloud Passwords extension cache. Not a prerequisite: the daemon downloads
+    # it from the Chrome Web Store on start (and a cached copy keeps working offline).
+    version = cached_extension_version()
+    detail = f"v{version} (downloaded)" if version else "downloads on daemon start"
+    _line(True, "extension", detail)
 
     # 4. Daemon / bridge / pairing (does not auto-start).
     st = client.daemon.status()

@@ -1,56 +1,64 @@
-"""Build a modified copy of the iCloud Passwords extension with the bridge injected."""
+"""Describe the bridge-carrying iCloud Passwords extension for chauffeur to build.
+
+The extension is downloaded from the Chrome Web Store by id (no local browser install
+required) and cached pristine under ``EXTENSION_DIR``. Each daemon start re-downloads
+so store updates are picked up; when the store is unreachable (offline) the cached
+copy keeps working. chauffeur does the patching and building (into
+``<profile>.extensions/`` at launch) and loads the result over CDP.
+"""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 from pathlib import Path
 
-from apwlib.browsers import find_extension_source
+from chauffeur import ExtensionSpec, download_extension
+from chauffeur.extension import ExtensionNotFoundError
+
 from apwlib.daemon.bridge import BRIDGE_JS
 from apwlib.errors import ApwError
 from apwlib.paths import EXTENSION_DIR, ensure_data_dir
 from apwlib.protocol import Status
 
+# The official iCloud Passwords Chrome extension.
+EXTENSION_ID = "pejdijmoenmkgeppbflobdenhhabjlaj"
 _BACKGROUND = "background.js"
 
 
-def build_extension(port: int, token: str) -> Path:
-    """Return a path to an unpacked extension whose background worker runs the bridge.
+def cached_extension_version() -> str | None:
+    """Version of the cached store download, or None if nothing is cached yet."""
+    with contextlib.suppress(OSError, ValueError):
+        version = json.loads((EXTENSION_DIR / "manifest.json").read_text()).get("version")
+        return str(version) if version else None
+    return None
 
-    The pristine extension is copied from the installed source (``background.js`` preserved
-    as ``.orig``, the source's versioned path recorded in ``.source``); each build rewrites
-    ``background.js`` as ``<orig> + APW_CONFIG + bridge``. The copy is refreshed when the
-    installed extension's version changes, so an update to iCloud Passwords is picked up
-    rather than frozen at first build.
-    """
+
+def _pristine_extension() -> Path:
+    """Return a pristine copy of the extension, downloading/refreshing the cache."""
     ensure_data_dir()
-    background = EXTENSION_DIR / _BACKGROUND
-    original = EXTENSION_DIR / f"{_BACKGROUND}.orig"
-    marker = EXTENSION_DIR / ".source"
-
-    source = find_extension_source()  # a versioned dir path, or None if none is installed
-    cached = marker.read_text().strip() if marker.exists() else None
-    have_copy = original.exists()
-
-    # (Re)copy when we have no cached copy, or the installed version differs from it.
-    if not have_copy or (source is not None and str(source) != cached):
-        if source is None:
-            if not have_copy:
-                raise ApwError(
-                    Status.GENERIC_ERROR,
-                    "iCloud Passwords extension not found. Install it in a supported browser "
-                    "from the Chrome Web Store, open that browser once, then retry.",
-                )
-            # Can't locate an install right now (e.g. profile moved) — keep the cached copy.
-        else:
-            if EXTENSION_DIR.exists():
-                shutil.rmtree(EXTENSION_DIR)
-            shutil.copytree(source, EXTENSION_DIR)
-            shutil.rmtree(EXTENSION_DIR / "_metadata", ignore_errors=True)
-            shutil.copyfile(background, original)
-            marker.write_text(str(source))
-
-    config = json.dumps({"port": port, "token": token})
-    background.write_text(f"{original.read_text()}\nself.APW_CONFIG = {config};\n{BRIDGE_JS}\n")
+    have_copy = (EXTENSION_DIR / "manifest.json").exists()
+    try:
+        download_extension(EXTENSION_ID, EXTENSION_DIR)  # replaces any prior contents
+    except ExtensionNotFoundError as exc:
+        if not have_copy:
+            raise ApwError(
+                Status.GENERIC_ERROR,
+                "could not download the iCloud Passwords extension from the "
+                f"Chrome Web Store: {exc}",
+            ) from exc
+        # Store unreachable (e.g. offline) — the cached copy keeps working.
+    else:
+        # Chrome refuses to load an unpacked extension containing _metadata.
+        shutil.rmtree(EXTENSION_DIR / "_metadata", ignore_errors=True)
     return EXTENSION_DIR
+
+
+def extension_spec(port: int, token: str) -> ExtensionSpec:
+    """The extension to load: pristine copy + injected bridge config + the bridge itself."""
+    return (
+        ExtensionSpec(_pristine_extension())
+        .inject_config(_BACKGROUND, {"port": port, "token": token})
+        .append(_BACKGROUND, BRIDGE_JS)
+    )

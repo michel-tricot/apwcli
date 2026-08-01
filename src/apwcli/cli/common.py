@@ -42,7 +42,7 @@ def _print_version(value: bool) -> None:
 
 @app.callback()
 def _root(
-    version: Annotated[
+    _version: Annotated[
         bool,
         typer.Option(
             "--version", callback=_print_version, is_eager=True, help="Print the version and exit."

@@ -35,7 +35,9 @@ def _needs_daemon(source: str) -> bool:
 
 @pytest.mark.parametrize("example", list(find_examples(*DOC_SOURCES)), ids=str)
 def test_docs_examples(example: CodeExample, eval_example: EvalExample) -> None:
-    eval_example.set_config(line_length=100)
+    # Doc examples print their output by design (the `#> ...` convention), so T201
+    # doesn't apply to them even though the project lints against stray prints.
+    eval_example.set_config(line_length=100, ruff_ignore=["T201"])
     executable = not _needs_daemon(example.source)
     if eval_example.update_examples:
         eval_example.format(example)

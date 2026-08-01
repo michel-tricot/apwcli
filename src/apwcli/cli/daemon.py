@@ -105,7 +105,7 @@ def daemon_logs(
         return
     if follow:
         with contextlib.suppress(KeyboardInterrupt):
-            subprocess.run(["tail", "-f", "-n", str(lines or 10), str(LOG_PATH)])
+            subprocess.run(["tail", "-f", "-n", str(lines or 10), str(LOG_PATH)], check=False)
         return
     entries = LOG_PATH.read_text().splitlines()
     for line in entries[-lines:] if lines else entries:

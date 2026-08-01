@@ -137,7 +137,7 @@ class _Daemon:
             )
         ensure_data_dir()
         _rotate_log()
-        log = open(LOG_PATH, "a")  # noqa: SIM115 (handed to the child; closed on our exit)
+        log = LOG_PATH.open("a")  # handed to the child; closed on our exit
         subprocess.Popen(
             [sys.executable, "-m", "apwlib.daemon"],
             stdin=subprocess.DEVNULL,

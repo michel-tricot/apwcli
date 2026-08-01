@@ -14,7 +14,7 @@ import time
 
 def clear_if_unchanged(secret: bytes) -> bool:
     """Clear the clipboard iff it still holds ``secret`` (don't clobber a later copy)."""
-    current = subprocess.run(["pbpaste"], capture_output=True).stdout
+    current = subprocess.run(["pbpaste"], capture_output=True, check=False).stdout
     if current == secret:
         subprocess.run(["pbcopy"], input=b"", check=False)
         return True

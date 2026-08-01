@@ -126,6 +126,7 @@ def _run_claude_code(client: Client) -> None:
         ["claude", "mcp", "add", "--scope", "user", "apw", "--", command, "mcp", "run"],
         capture_output=True,
         text=True,
+        check=False,  # the exit code is inspected below
     )
     if result.returncode != 0:
         console.print(f"[red]Error:[/red] `claude mcp add` failed:\n{result.stderr.strip()}")

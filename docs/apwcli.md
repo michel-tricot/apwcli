@@ -7,8 +7,9 @@ Passwords (iCloud Keychain) from the terminal.
 $ pip install apwcli
 ```
 
-Requires macOS with the iCloud Passwords extension installed in a supported
-browser (Chrome, Brave, Edge, or Chromium). `apwcli --version` prints the
+Requires macOS with a supported browser installed (Chrome, Brave, Edge, or
+Chromium); the iCloud Passwords extension itself is downloaded automatically
+from the Chrome Web Store. `apwcli --version` prints the
 installed apwcli and apwlib versions.
 
 ## Getting started
@@ -32,7 +33,7 @@ fix:
 $ apwcli doctor
 ● browser      Brave, Google Chrome
 ● apple helper installed
-● extension    v3.3.0_0
+● extension    v3.3.0 (downloaded)
 ● daemon       running
 ● bridge       connected — Brave (pid 41911)
 ● pairing      paired
@@ -41,7 +42,9 @@ $ apwcli doctor
 The `browser` line lists the supported browsers installed; the `bridge` line
 names the one the daemon is actually running (with its pid). `apple helper` is
 Apple's password helper (the native-messaging integration) that lets the
-extension reach the keychain — "installed" means macOS has it wired up.
+extension reach the keychain — "installed" means macOS has it wired up. The
+`extension` line shows the cached Chrome Web Store download (refreshed on
+daemon start; `downloads on daemon start` before the first run).
 
 ## Passwords
 

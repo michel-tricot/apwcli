@@ -56,7 +56,7 @@ def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.Monkey
     # restart must pre-check browsers and fail with a hint, not let _spawn raise uncaught.
     import apwcli.cli.daemon as dm
 
-    monkeypatch.setattr(dm, "installed_browsers", lambda: [])
+    monkeypatch.setattr(dm, "installed_browsers", list)
     result = runner.invoke(app, ["daemon", "restart"])
     assert result.exit_code == 1
     assert "No supported browser found" in result.stderr

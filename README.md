@@ -32,8 +32,9 @@ uv tool install apwcli    # or: pipx install apwcli
 
 Or from a clone: `uv sync`, then `uv run apwcli --help`.
 
-Requires macOS with the iCloud Passwords extension installed in a supported
-browser (Chrome, Brave, Edge, or Chromium).
+Requires macOS with a supported browser installed (Chrome, Brave, Edge, or
+Chromium); the iCloud Passwords extension itself is downloaded automatically
+from the Chrome Web Store.
 
 ## Quick start
 

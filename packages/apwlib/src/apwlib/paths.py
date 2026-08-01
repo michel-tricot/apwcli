@@ -5,10 +5,9 @@ Everything lives under ``~/.apwlib`` (created mode 0700).
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-DATA_DIR = Path(os.path.expanduser("~/.apwlib"))
+DATA_DIR = Path("~/.apwlib").expanduser()
 SOCKET_PATH = DATA_DIR / "apw.sock"
 CONFIG_PATH = DATA_DIR / "config.json"
 EXTENSION_DIR = DATA_DIR / "extension"

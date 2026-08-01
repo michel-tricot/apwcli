@@ -124,8 +124,12 @@ The plaintext `body` the extension encrypts, per operation:
 # Part 2 — How the library is designed
 
 `apwlib` drives a headless approved browser, loads a copy of the iCloud
-Passwords extension with a small **bridge** injected, and proxies encrypted
-messages. The browser does the crypto; Python is transport and orchestration.
+Passwords extension (downloaded from the Chrome Web Store) with a small
+**bridge** injected, and proxies encrypted messages. The browser does the
+crypto; Python is transport and orchestration. All browser plumbing — launch
+flags, extension patching/building, CDP loading, the app-mode PIN window —
+is delegated to the [chauffeur](https://github.com/michel-tricot/chauffeur)
+library.
 
 ## Architecture
 
@@ -158,19 +162,20 @@ models.py       PasswordEntry, OTPEntry
 errors.py       ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired)
 config.py       read/write ~/.apwlib/config.json
 paths.py        ~/.apwlib locations (socket, lock, extension dir, browser profile)
-browsers.py     discover installed approved browsers + the installed extension source
-                  (shared by daemon/ and pinwindow/)
+browsers.py     approved-browser catalog (chauffeur's discovery + our profile/cask
+                  decoration; shared by daemon/ and pinwindow/)
 pinwindow/
-  __init__.py   request_pin — no-TTY pin_provider (PIN-entry window)
+  __init__.py   request_pin — no-TTY pin_provider (chauffeur app window)
   page.html     the six-box code page
   default.css   default stylesheet (overridden by ~/.apwlib/pinwindow.css or css=)
 daemon/
   __main__.py   `python -m apwlib.daemon` entry point
-  server.py     owns the browser; WebSocket bridge + unix-socket servers; singleton lock
-  extension.py  build a modified extension copy with bridge.js + local config injected
+  server.py     owns the browser (via chauffeur); WebSocket bridge + unix-socket
+                  servers; singleton lock
+  extension.py  store-download cache + the chauffeur ExtensionSpec that injects
+                  bridge.js and its config
   bridge.js     JavaScript bridge appended to the extension's background worker
   bridge.py     loads bridge.js
-  cdp.py        minimal Chrome DevTools client: load the unpacked extension
 ```
 
 ## Request flow
@@ -221,15 +226,15 @@ transparently — triggers the challenge (macOS shows the PIN), calls
 provider, an unpaired call raises `NotPairedError`.
 
 For callers without a terminal, `apwlib.pinwindow.request_pin` is a bundled
-`pin_provider` that pops a dialog-sized PIN window: a localhost-only,
-single-use HTTP server serves a six-box code page (`page.html`), opened
-via an installed browser binary in chromeless `--app` mode with a throwaway
-profile — preferring the browser the user is actually running. Anyone who can
-read the macOS PIN dialog is at the screen, so an on-screen window is always
-answerable when pairing is possible at all. The page posts the PIN back
-(or an empty PIN from a close beacon, so a dismissed window fails fast);
-launch failure, cancellation, or timeout surface as `NotPairedError`
-(exit code 9). Styling is a stylesheet served at `/style.css`, resolved as:
+`pin_provider` that pops a dialog-sized PIN window: chauffeur opens the
+six-box code page (`page.html`) as a chromeless `--app` window with a
+throwaway profile — using an installed browser binary, preferring the browser
+the user is actually running. Anyone who can read the macOS PIN dialog is at
+the screen, so an on-screen window is always answerable when pairing is
+possible at all. The page posts the PIN back over chauffeur's `py_chauffeur`
+channel (or an empty PIN from a close beacon, so a dismissed window fails
+fast); launch failure, cancellation, or timeout surface as `NotPairedError`
+(exit code 9). Styling is a `style.css` sibling of the page, resolved as:
 `css=` argument → user override at `~/.apwlib/pinwindow.css` → bundled
 `default.css`. The CLI prompts in the terminal on a TTY and falls back to
 this window otherwise.
@@ -280,15 +285,16 @@ class OTPEntry:
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Approach | Managed browser + real extension | The launch constraint leaves no browserless option; reuse an installed browser and the official extension. |
+| Approach | Managed browser + real extension | The launch constraint leaves no browserless option; reuse an installed browser and the official extension (downloaded from the Chrome Web Store). |
+| Browser plumbing | chauffeur | Launching, extension patching/building, CDP loading, and app windows are generic browser mechanics — maintained once in a dedicated library instead of hand-rolled here. |
 | Crypto | Runs in the browser, not Python | The extension's `SecretSession` implements Apple's SRP/SMSG correctly — proxy it, no reimplementation risk. |
 | Facade API | Sync | The client talks to a local socket with line framing; trivially synchronous and easy from a CLI. |
 | Runtime | Auto-managed singleton daemon | Owns the browser and the in-memory session; auto-starts detached and is reused, so the PIN is entered once per daemon lifetime. |
 | CLI secrets | Mask in tables, clipboard opt-in | Passwords otherwise land in terminal scrollback. `text`/`json` (pipe targets) stay unmasked; `-c` routes the value via `pbcopy`, never stdout. |
 | No-TTY pairing | App-mode PIN window | The PIN must be typed by a human at the screen. A chromeless `--app` window of the managed browser looks like a native dialog and adds no dependency; PyObjC (heavy) and osascript (crude) lost. |
 | MCP scope | No plaintext passwords by default | MCP tool results are sent to the model provider. `list_accounts`/`get_otp`/`save_password` are safe; `get_password` is gated behind `--allow-passwords`. |
-| Dependencies | `websockets` (lib), `typer`/`rich`/`fastmcp` (CLI) | The daemon needs a WebSocket server (bridge) and client (CDP); no crypto dependency. |
-| Platform | macOS 14+, Python ≥ 3.11 | The helper, extension, and PIN flow are macOS-only; a non-macOS spawn fails with a clear error. |
+| Dependencies | `websockets` + `chauffeur` (lib), `typer`/`rich`/`fastmcp` (CLI) | The daemon needs a WebSocket server (bridge) and a browser control plane (chauffeur); no crypto dependency. |
+| Platform | macOS 14+, Python ≥ 3.12 | The helper, extension, and PIN flow are macOS-only; a non-macOS spawn fails with a clear error. chauffeur sets the Python floor. |
 
 ## Notes & limits
 
@@ -301,12 +307,14 @@ class OTPEntry:
   a dead bridge. A failure while launching the browser or loading the extension
   likewise terminates the child before exiting, so no orphaned browsers accumulate.
 - **Version drift:** the daemon reads the native-messaging manifest for the helper
-  path and locates the installed extension dynamically. It records the copied
-  version and rebuilds its working copy when the installed extension updates, so a
-  new iCloud Passwords release is picked up rather than frozen at first build.
-- **Headless loading:** the extension is loaded via CDP `Extensions.loadUnpacked`,
-  which needs the browser launched with remote debugging +
-  `--enable-unsafe-extension-debugging`.
+  path, and re-downloads the extension from the Chrome Web Store on every start
+  (cached under `~/.apwlib/extension`), so a new iCloud Passwords release is
+  picked up rather than frozen at first download. When the store is unreachable
+  (offline), the cached copy keeps working.
+- **Headless loading:** chauffeur loads the extension via CDP
+  `Extensions.loadUnpacked` (launching the browser with remote debugging +
+  `--enable-unsafe-extension-debugging`), since branded Chrome 137+ silently
+  ignores `--load-extension`.
 - **No secrets in logs:** the daemon log (`~/.apwlib/daemon.log`) records
   lifecycle and errors only; command bodies (which carry passwords) are
   encrypted inside the bridge and never logged in plaintext.

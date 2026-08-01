@@ -19,13 +19,13 @@ import shutil
 import signal
 import socket as socketlib
 from pathlib import Path
-from typing import Protocol
 
 import websockets
+from chauffeur import Browser as ManagedBrowser
+from chauffeur import LaunchSpec
 
 from apwlib.browsers import Browser
-from apwlib.daemon.cdp import load_unpacked_extension
-from apwlib.daemon.extension import build_extension
+from apwlib.daemon.extension import extension_spec
 from apwlib.paths import (
     APPLE_NATIVE_MANIFEST,
     LOCK_PATH,
@@ -35,27 +35,6 @@ from apwlib.paths import (
 from apwlib.protocol import WIRE_NO_BRIDGE, Status
 
 REQUEST_TIMEOUT = 30.0
-
-_BROWSER_FLAGS = [
-    "--remote-allow-origins=*",
-    "--enable-unsafe-extension-debugging",
-    "--headless=new",
-    "--no-first-run",
-    "--no-default-browser-check",
-    # Keep the extension's service worker responsive (not throttled/backgrounded).
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    # Trim footprint: this browser only hosts the extension worker + native port, it never
-    # renders anything. Dropping the GPU process is the big win (~270 MB -> ~37 MB of
-    # physical footprint, measured); the rest disable background subsystems we don't use.
-    "--disable-gpu",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-sync",
-    "--disable-default-apps",
-    "--disable-features=Translate,MediaRouter,OptimizationHints,"
-    "InterestFeedContentSuggestions,CalculateNativeWinOcclusion",
-]
 
 
 def _free_port() -> int:
@@ -153,7 +132,7 @@ async def _handle_client(
     session: ExtensionSession,
     stop: asyncio.Future[None],
     browser: Browser,
-    child: asyncio.subprocess.Process,
+    browser_pid: int,
 ) -> None:
     try:
         line = await asyncio.wait_for(reader.readline(), REQUEST_TIMEOUT)
@@ -168,7 +147,7 @@ async def _handle_client(
                 "paired": session.paired,
                 "pairing_state": session.pairing_state,
                 "browser": browser.name,
-                "browser_pid": child.pid,
+                "browser_pid": browser_pid,
             }
         elif op == "stop":
             response = {"stopping": True}
@@ -217,14 +196,14 @@ def _acquire_singleton_lock() -> int | None:
     return fd
 
 
-class _Waitable(Protocol):
-    async def wait(self) -> int: ...
+async def _watch_browser(managed: ManagedBrowser, stop: asyncio.Future[None]) -> None:
+    """Trigger shutdown if the managed browser exits, so the lock frees and cleanup runs.
 
-
-async def _watch_child(child: _Waitable, stop: asyncio.Future[None]) -> None:
-    """Trigger shutdown if the managed browser exits, so the lock frees and cleanup runs."""
+    ``serve()`` returns when the DevTools connection drops (the browser died) or its
+    primary target closes — either way the daemon is useless without its browser.
+    """
     with contextlib.suppress(Exception):
-        await child.wait()
+        await managed.serve()
     if not stop.done():
         stop.set_result(None)
 
@@ -244,25 +223,22 @@ async def run(browser: Browser) -> None:
     ws_server = await websockets.serve(session.serve, "127.0.0.1", ws_port)
 
     # Everything past the lock is guarded: a failure while launching the browser or
-    # loading the extension must still terminate the child and release the lock, or
+    # loading the extension must still terminate the browser and release the lock, or
     # we'd orphan a browser and pile more up on every retry.
-    child: asyncio.subprocess.Process | None = None
+    managed: ManagedBrowser | None = None
     unix_server: asyncio.Server | None = None
     watcher: asyncio.Task[None] | None = None
     try:
-        extension_path = build_extension(ws_port, token)
-        profile = _prepare_profile(browser)
-        devtools_port = _free_port()
-
-        child = await asyncio.create_subprocess_exec(
-            str(browser.binary),
-            f"--user-data-dir={profile}",
-            f"--remote-debugging-port={devtools_port}",
-            *_BROWSER_FLAGS,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        # chauffeur launches the browser (headless, minimal footprint), builds the
+        # patched extension beside the profile, and loads it over CDP.
+        spec = LaunchSpec(
+            profile=_prepare_profile(browser),
+            browser=browser.binary,
+            headless=True,
+            extensions=(extension_spec(ws_port, token),),
         )
-        await load_unpacked_extension(devtools_port, str(extension_path))
+        managed = await ManagedBrowser(spec).start()
+        browser_pid = managed.handle.proc.pid if managed.handle else 0
 
         stop = asyncio.get_running_loop().create_future()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -270,12 +246,12 @@ async def run(browser: Browser) -> None:
                 asyncio.get_running_loop().add_signal_handler(
                     sig, lambda: stop.done() or stop.set_result(None)
                 )
-        watcher = asyncio.create_task(_watch_child(child, stop))
+        watcher = asyncio.create_task(_watch_browser(managed, stop))
 
         if SOCKET_PATH.exists():
             SOCKET_PATH.unlink()
         unix_server = await asyncio.start_unix_server(
-            lambda r, w: _handle_client(r, w, session, stop, browser, child),
+            lambda r, w: _handle_client(r, w, session, stop, browser, browser_pid),
             path=str(SOCKET_PATH),
         )
         SOCKET_PATH.chmod(0o600)
@@ -288,11 +264,9 @@ async def run(browser: Browser) -> None:
         if unix_server is not None:
             unix_server.close()
         ws_server.close()
-        if child is not None:
-            with contextlib.suppress(ProcessLookupError):
-                child.terminate()
+        if managed is not None:
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(child.wait(), 5)
+                await managed.aclose()
         with contextlib.suppress(FileNotFoundError):
             SOCKET_PATH.unlink()
         os.close(lock_fd)
