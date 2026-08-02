@@ -161,11 +161,14 @@ light.
 ## Module layout
 
 ```
-client.py       ApplePasswords facade (password API) + _Daemon (transport,
-                  lifecycle, pairing; exposed as ApplePasswords.daemon)
+client.py       ApplePasswords facade (password API) + Daemon (transport,
+                  lifecycle, pairing — its own public class; the facade keeps
+                  a private instance)
 protocol.py     Command / Action / Status enums, message builders, response parsing
 models.py       PasswordEntry, OTPEntry
-errors.py       ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired)
+errors.py       ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired,
+                  plus DaemonStartError)
+diagnostics.py  run_checks — structured health checks (backs `apwcli doctor`)
 config.py       read/write ~/.apwlib/config.json
 paths.py        ~/.apwlib locations (socket, lock, extension dir, browser profile)
 browsers.py     approved-browser catalog (chauffeur's discovery + our profile/cask

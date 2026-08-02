@@ -27,7 +27,7 @@ Enter the PIN shown by macOS: 123456
 ```
 
 If anything misbehaves, `apwcli doctor` checks the whole chain and points at the
-fix:
+fix (`--json` for a machine-readable report):
 
 ```console
 $ apwcli doctor
@@ -71,6 +71,7 @@ printing it; add `--show` to reveal it or `-c` to copy it.
 ```console
 $ apwcli otp get github.com        # the current code
 $ apwcli otp get github.com -c     # copy it to the clipboard
+$ apwcli otp get github.com me@example.com -c  # narrow by username first
 $ apwcli otp list github.com       # accounts that have codes
 ```
 
@@ -106,8 +107,13 @@ $ apwcli daemon stop             # stop the daemon and its browser
 $ apwcli daemon restart          # replace a wedged daemon with a fresh one
 $ apwcli daemon logs             # tail the log; -f to follow, --clear to wipe it
 $ apwcli daemon start            # pre-warm; --foreground to run attached,
-                                 # --browser to pick one (auto, chromium, chrome, brave, edge)
+                                 # --browser to pick one for this daemon
+                                 # (auto, chromium, chrome, brave, edge)
 ```
+
+`daemon status --json` prints the state as JSON for scripts; `--browser` applies
+to that daemon only (set a permanent default with the `browser` key in
+`~/.apwlib/config.json`).
 
 The log lives at `~/.apwlib/daemon.log` (records lifecycle and errors only, never
 plaintext secrets) and is rotated to `daemon.log.1` once it passes ~1 MB.

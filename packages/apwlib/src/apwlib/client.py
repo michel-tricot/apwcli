@@ -10,12 +10,14 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypedDict
 
 from apwlib import protocol
 from apwlib.errors import (
     ApwError,
     DaemonNotRunningError,
+    DaemonStartError,
     NotPairedError,
     SessionError,
     error_for,
@@ -26,14 +28,13 @@ from apwlib.protocol import WIRE_UNPAIRED, Status
 
 
 class DaemonStatus(TypedDict):
-    """The shape of :meth:`_Daemon.status`; keeps its two return paths in sync."""
+    """The shape of :meth:`Daemon.status`; keeps its two return paths in sync."""
 
     running: bool
     bridge: bool
     paired: bool
     browser: str | None
     browser_pid: int | None
-    pairing_state: str | None
 
 
 _TIMEOUT = 35.0  # above the daemon's own waits (30s bridge requests, 20s pairing)
@@ -55,16 +56,22 @@ def _error(response: dict[str, Any]) -> str | None:
     return None if "data" in response else response.get("error")
 
 
-class _Daemon:
+class Daemon:
     """The connection to the background daemon: transport, lifecycle, and pairing.
 
-    Exposed as :attr:`ApplePasswords.daemon`. Callers rarely touch it — the facade
-    auto-starts and auto-pairs — but it backs ``apwcli daemon start/stop/status/pair``.
+    ``ApplePasswords`` manages one internally (auto-start, auto-pair); construct your
+    own only for explicit lifecycle control — it backs ``apwcli daemon
+    start/stop/status/pair``.
     """
 
-    def __init__(self, socket_path: str, auto_start: bool = True) -> None:
-        self._socket_path = socket_path
+    def __init__(self, socket_path: str | Path | None = None, auto_start: bool = True) -> None:
+        self._socket_path = str(socket_path or SOCKET_PATH)
         self._auto_start = auto_start
+
+    @property
+    def log_path(self) -> Path:
+        """Where the detached daemon writes its log."""
+        return LOG_PATH
 
     # -- transport -------------------------------------------------------------
     def _send_raw(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -87,13 +94,13 @@ class _Daemon:
         except (OSError, json.JSONDecodeError) as exc:
             # The daemon went away mid-request (empty/truncated reply, reset, or
             # timeout). Deliberately NOT DaemonNotRunningError: the request may
-            # already have executed, so deliver()'s auto-start retry must not
+            # already have executed, so _deliver()'s auto-start retry must not
             # re-send it.
             raise SessionError("daemon connection lost mid-request") from exc
         finally:
             conn.close()
 
-    def deliver(self, message: dict[str, Any]) -> dict[str, Any]:
+    def _deliver(self, message: dict[str, Any]) -> dict[str, Any]:
         """Deliver a message, auto-starting the daemon (if enabled) when none answers.
 
         One start, one retry — anything still wrong after that surfaces as the error
@@ -109,7 +116,7 @@ class _Daemon:
             return self._send_raw(message)  # retry once after starting
 
     # -- lifecycle -------------------------------------------------------------
-    def _spawn(self) -> None:
+    def _spawn(self, browser: str | None = None) -> None:
         """Launch the daemon detached, so it survives this process exiting."""
         if sys.platform != "darwin":
             raise ApwError(
@@ -131,7 +138,7 @@ class _Daemon:
         _rotate_log()
         log = LOG_PATH.open("a")  # handed to the child; closed on our exit
         subprocess.Popen(
-            [sys.executable, "-m", "apwlib.daemon"],
+            [sys.executable, "-m", "apwlib.daemon", *([browser] if browser else [])],
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,
@@ -185,18 +192,23 @@ class _Daemon:
             time.sleep(0.1)
         return False
 
-    def start(self) -> bool:
-        """Ensure a daemon is running; returns True once its bridge is connected.
+    def _require_bridge(self) -> None:
+        if not self._wait_bridge():
+            raise DaemonStartError(f"daemon did not become ready; see {LOG_PATH}")
+
+    def start(self, browser: str | None = None) -> None:
+        """Ensure a daemon is running with its bridge connected.
 
         A no-op when one is already reachable. Otherwise spawns one — after waiting
         out a stopping daemon's singleton lock, so `stop` immediately followed by
-        `start` works — and waits for the bridge to come up.
+        `start` works. ``browser`` overrides the configured browser for this daemon
+        only (it is not persisted). Raises ``DaemonStartError`` if the bridge does
+        not come up, and ``ApwError`` when no supported browser is installed.
         """
-        if self.status()["running"]:
-            return self._wait_bridge()
-        self._wait_stopped()  # a stopping daemon releases the lock last
-        self._spawn()
-        return self._wait_bridge()
+        if not self.status()["running"]:
+            self._wait_stopped()  # a stopping daemon releases the lock last
+            self._spawn(browser)
+        self._require_bridge()
 
     def stop(self) -> bool:
         """Ask a running daemon to shut down. Returns False if none was running."""
@@ -206,12 +218,12 @@ class _Daemon:
         except SessionError:
             return False
 
-    def restart(self) -> bool:
-        """Stop any running daemon and start a fresh one. Returns True if the bridge came up."""
+    def restart(self, browser: str | None = None) -> None:
+        """Stop any running daemon and start a fresh one (raises like :meth:`start`)."""
         self.stop()
         self._wait_stopped()
-        self._spawn()
-        return self._wait_bridge()
+        self._spawn(browser)
+        self._require_bridge()
 
     def status(self) -> DaemonStatus:
         """Report daemon reachability, bridge connectivity, and pairing (does not auto-start).
@@ -229,7 +241,6 @@ class _Daemon:
             "paired": bool(resp.get("paired")),
             "browser": resp.get("browser"),
             "browser_pid": resp.get("browser_pid"),
-            "pairing_state": resp.get("pairing_state"),
         }
 
     # -- pairing primitives ----------------------------------------------------
@@ -242,7 +253,7 @@ class _Daemon:
         Returns once the handshake is ready for the PIN, so :meth:`verify_challenge`
         can be called immediately. Raises if the daemon/extension can't pair at all.
         """
-        response = self.deliver({"op": "pair_challenge"})
+        response = self._deliver({"op": "pair_challenge"})
         if _error(response):
             raise error_for(response.get("status", Status.SERVER_ERROR), response.get("error"))
 
@@ -252,7 +263,7 @@ class _Daemon:
         False means the helper rejected the PIN (reported the moment the handshake
         collapses) or the attempt timed out daemon-side.
         """
-        response = self.deliver({"op": "pair_verify", "pin": str(pin)})
+        response = self._deliver({"op": "pair_verify", "pin": str(pin)})
         if _error(response):
             raise error_for(response.get("status", Status.SERVER_ERROR), response.get("error"))
         return bool(response.get("paired"))
@@ -262,31 +273,31 @@ class ApplePasswords:
     """Read and write Apple Passwords (iCloud Keychain) via a managed daemon.
 
     The daemon (a headless browser hosting the iCloud Passwords extension) is auto-started
-    on first use as a detached singleton and reused thereafter — see :attr:`daemon` for
-    explicit control. Pairing needs a one-time PIN: if ``pin_provider`` is given, an
-    unpaired request transparently pairs (pops the macOS dialog, calls ``pin_provider()``,
-    retries); otherwise it raises ``NotPairedError``.
+    on first use as a detached singleton and reused thereafter; use :class:`Daemon` for
+    explicit lifecycle control. Pairing needs a one-time PIN: if ``pin_provider`` is given,
+    an unpaired request transparently pairs (pops the macOS dialog, calls
+    ``pin_provider()``, retries); otherwise it raises ``NotPairedError``.
 
     Pass ``auto_start=False`` to require an already-running daemon.
     """
 
     def __init__(
         self,
-        socket_path: str | None = None,
+        socket_path: str | Path | None = None,
         auto_start: bool = True,
         pin_provider: Callable[[], str] | None = None,
     ) -> None:
-        self.daemon = _Daemon(socket_path or str(SOCKET_PATH), auto_start)
+        self._daemon = Daemon(socket_path, auto_start)
         self._pin_provider = pin_provider
 
     # -- request plumbing ------------------------------------------------------
     def _send(self, message: dict[str, Any]) -> dict[str, Any]:
         """Deliver a message, auto-pairing on an unpaired session when possible."""
-        response = self.daemon.deliver(message)
+        response = self._daemon._deliver(message)
         if _error(response) == WIRE_UNPAIRED:
             if self._pin_provider:
                 self._pair()
-                response = self.daemon.deliver(message)  # retry once after pairing
+                response = self._daemon._deliver(message)  # retry once after pairing
             if _error(response) == WIRE_UNPAIRED:
                 raise NotPairedError("session is not paired")
         return response
@@ -295,8 +306,8 @@ class ApplePasswords:
         """Pop the PIN dialog, collect the PIN, and verify (blocks until settled)."""
         if not self._pin_provider:
             return
-        self.daemon.request_challenge()
-        self.daemon.verify_challenge(str(self._pin_provider()))
+        self._daemon.request_challenge()
+        self._daemon.verify_challenge(str(self._pin_provider()))
 
     def _payload(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         response = self._send(message)
@@ -311,26 +322,31 @@ class ApplePasswords:
             raise error_for(status, response.get("error"))
 
     # -- passwords -------------------------------------------------------------
-    def get_login_names(self, url: str) -> list[PasswordEntry]:
+    def list_accounts(self, url: str) -> list[PasswordEntry]:
+        """The accounts saved for a site (usernames only, never passwords)."""
         _require_url(url)
-        return [PasswordEntry.from_raw(e) for e in self._payload(protocol.get_login_names_for_url(url))]
+        return [PasswordEntry._from_raw(e) for e in self._payload(protocol.get_login_names_for_url(url))]
 
-    def get_password(self, url: str, login: str = "") -> list[PasswordEntry]:
+    def get_password(self, url: str, username: str | None = None) -> list[PasswordEntry]:
+        """Password entries for a site, optionally restricted to ``username``."""
         _require_url(url)
-        return [PasswordEntry.from_raw(e) for e in self._payload(protocol.get_password_for_url(url, login))]
+        return [PasswordEntry._from_raw(e) for e in self._payload(protocol.get_password_for_url(url, username or ""))]
 
-    def save_account(self, url: str, login: str, password: str) -> None:
+    def save_password(self, url: str, username: str, password: str) -> None:
+        """Create or update a credential."""
         _require_url(url)
-        self._ok(protocol.save_account_for_url(url, login, password))
+        self._ok(protocol.save_account_for_url(url, username, password))
 
     # -- one-time codes --------------------------------------------------------
     def get_otp(self, url: str) -> list[OTPEntry]:
+        """The current one-time code(s) for a site."""
         _require_url(url)
-        return [OTPEntry.from_raw(e) for e in self._payload(protocol.get_otp_for_url(url))]
+        return [OTPEntry._from_raw(e) for e in self._payload(protocol.get_otp_for_url(url))]
 
     def list_otp(self, url: str) -> list[OTPEntry]:
+        """The accounts that have one-time codes for a site (no codes)."""
         _require_url(url)
-        return [OTPEntry.from_raw(e) for e in self._payload(protocol.list_otp_for_url(url))]
+        return [OTPEntry._from_raw(e) for e in self._payload(protocol.list_otp_for_url(url))]
 
 
 def _require_url(url: str) -> None:

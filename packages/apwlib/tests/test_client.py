@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from apwlib import ApplePasswords, ApwError, DaemonNotRunningError, NotPairedError
+from apwlib import ApplePasswords, ApwError, Daemon, DaemonNotRunningError, DaemonStartError, NotPairedError
 from apwlib.protocol import Status
 
 
@@ -13,18 +13,18 @@ def test_no_daemon_raises_daemon_not_running() -> None:
     # DaemonNotRunningError (not a generic session error).
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock", auto_start=False)
     with pytest.raises(DaemonNotRunningError):
-        pw.get_login_names("github.com")
+        pw.list_accounts("github.com")
 
 
 def test_unpaired_response_raises_not_paired(monkeypatch: pytest.MonkeyPatch) -> None:
     pw = ApplePasswords(auto_start=False)
     monkeypatch.setattr(
-        pw.daemon,
+        pw._daemon,
         "_send_raw",
         lambda _msg: {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"},
     )
     with pytest.raises(NotPairedError):
-        pw.get_login_names("github.com")
+        pw.list_accounts("github.com")
 
 
 def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,8 +45,8 @@ def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
             "data": {"STATUS": int(Status.SUCCESS), "Entries": [{"USR": "me", "sites": ["x"]}]},
         }
 
-    monkeypatch.setattr(pw.daemon, "_send_raw", fake_send_raw)
-    result = pw.get_login_names("github.com")
+    monkeypatch.setattr(pw._daemon, "_send_raw", fake_send_raw)
+    result = pw.list_accounts("github.com")
     assert prompted  # the PIN provider was invoked
     assert [e.username for e in result] == ["me"]
 
@@ -54,12 +54,12 @@ def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unpaired_without_provider_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     pw = ApplePasswords(auto_start=False)  # no pin_provider
     monkeypatch.setattr(
-        pw.daemon,
+        pw._daemon,
         "_send_raw",
         lambda _m: {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"},
     )
     with pytest.raises(NotPairedError):
-        pw.get_login_names("github.com")
+        pw.list_accounts("github.com")
 
 
 def test_daemon_lost_mid_request_raises_session_error() -> None:
@@ -87,7 +87,7 @@ def test_daemon_lost_mid_request_raises_session_error() -> None:
     try:
         pw = ApplePasswords(socket_path=sock_path, auto_start=False)
         with pytest.raises(SessionError) as excinfo:
-            pw.get_login_names("github.com")
+            pw.list_accounts("github.com")
         assert not isinstance(excinfo.value, DaemonNotRunningError)
     finally:
         thread.join(timeout=5)
@@ -105,10 +105,10 @@ def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> No
             raise DaemonNotRunningError("daemon not running")
         return {"id": "1", "data": {"STATUS": int(Status.SUCCESS), "Entries": []}}
 
-    monkeypatch.setattr(pw.daemon, "_send_raw", fake_send_raw)
-    monkeypatch.setattr(pw.daemon, "start", lambda: calls.__setitem__("start", calls["start"] + 1) or True)
+    monkeypatch.setattr(pw._daemon, "_send_raw", fake_send_raw)
+    monkeypatch.setattr(pw._daemon, "start", lambda: calls.__setitem__("start", calls["start"] + 1) or True)
 
-    assert pw.get_login_names("github.com") == []
+    assert pw.list_accounts("github.com") == []
     assert calls == {"raw": 2, "start": 1}  # started once, retried once
 
 
@@ -116,7 +116,7 @@ def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(sys, "platform", "linux")
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
     with pytest.raises(ApwError, match="macOS"):
-        pw.get_login_names("github.com")
+        pw.list_accounts("github.com")
 
 
 def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,36 +126,48 @@ def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
     spawned = []
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
-    monkeypatch.setattr(pw.daemon, "_wait_stopped", lambda *a, **k: True)
-    monkeypatch.setattr(pw.daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)
+    monkeypatch.setattr(pw._daemon, "_wait_stopped", lambda *a, **k: True)
+    monkeypatch.setattr(pw._daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)
     with pytest.raises(ApwError, match="no supported browser"):
-        pw.get_login_names("github.com")
+        pw.list_accounts("github.com")
     assert spawned == []  # failed before launching/waiting on anything
 
 
 def test_start_noop_when_daemon_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    daemon = ApplePasswords(auto_start=False).daemon
+    daemon = Daemon(auto_start=False)
     spawned = []
     monkeypatch.setattr(daemon, "status", lambda: {"running": True, "bridge": True, "paired": True})
     monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
     monkeypatch.setattr(daemon, "_spawn", lambda: spawned.append(1))
 
-    assert daemon.start() is True
+    daemon.start()  # no raise
     assert spawned == []  # a running daemon is left alone
 
 
 def test_start_waits_out_a_stopping_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     # `stop` immediately followed by `start` must work: the stopping daemon releases
     # its singleton lock last, so start() waits for the lock before spawning.
-    daemon = ApplePasswords(auto_start=False).daemon
+    daemon = Daemon(auto_start=False)
     order = []
     monkeypatch.setattr(daemon, "status", lambda: {"running": False, "bridge": False, "paired": False})
     monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: order.append("waited") or True)
-    monkeypatch.setattr(daemon, "_spawn", lambda: order.append("spawned"))
+    monkeypatch.setattr(daemon, "_spawn", lambda *a, **k: order.append("spawned"))
     monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
 
-    assert daemon.start() is True
+    daemon.start()
     assert order == ["waited", "spawned"]
+
+
+def test_start_raises_when_bridge_never_comes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A spawned daemon whose bridge never connects is an error with a pointer at the
+    # log — not a silent False the caller has to translate.
+    daemon = Daemon(auto_start=False)
+    monkeypatch.setattr(daemon, "status", lambda: {"running": False, "bridge": False, "paired": False})
+    monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: True)
+    monkeypatch.setattr(daemon, "_spawn", lambda *a, **k: None)
+    monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: False)
+    with pytest.raises(DaemonStartError, match=r"daemon\.log"):
+        daemon.start()
 
 
 def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -166,7 +178,7 @@ def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp
 
     lock = tmp_path / "daemon.lock"
     monkeypatch.setattr(client, "LOCK_PATH", lock)
-    daemon = ApplePasswords(auto_start=False).daemon
+    daemon = Daemon(auto_start=False)
 
     assert daemon._singleton_free() is True  # nobody holds it
 
@@ -184,7 +196,7 @@ def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp
 def test_verify_challenge_returns_the_daemon_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     # The daemon owns the pairing waits; verify_challenge is one blocking op whose
     # reply carries the outcome.
-    daemon = ApplePasswords(auto_start=False).daemon
+    daemon = Daemon(auto_start=False)
     sent: list[dict] = []
     monkeypatch.setattr(daemon, "_send_raw", lambda m: sent.append(m) or {"paired": False})
     assert daemon.verify_challenge("123456") is False
@@ -199,7 +211,7 @@ def test_pairing_ops_raise_on_daemon_error(monkeypatch: pytest.MonkeyPatch) -> N
     # mapped error, not read as a rejected PIN.
     from apwlib import SessionError
 
-    daemon = ApplePasswords(auto_start=False).daemon
+    daemon = Daemon(auto_start=False)
     error = {"status": int(Status.INVALID_SESSION), "error": "no extension connected"}
     monkeypatch.setattr(daemon, "_send_raw", lambda _m: error)
     with pytest.raises(SessionError):

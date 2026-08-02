@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any, NoReturn
 
 import typer
-from apwlib import ApplePasswords, ApwError, NotPairedError, Status
+from apwlib import ApplePasswords, ApwError, Daemon, NotPairedError, Status
 from apwlib import __version__ as _apwlib_version
 from rich import box
 from rich.console import Console
@@ -74,6 +74,10 @@ def _prompt_pin() -> str:
 # An unpaired command auto-pairs: it pops the macOS PIN dialog and collects the code
 # from the terminal — or, without a TTY, from a small on-screen PIN window.
 client = ApplePasswords(pin_provider=_prompt_pin)
+
+# Explicit daemon control for the `daemon` group, doctor, and pairing; data commands
+# go through `client`, which manages its own daemon connection.
+daemon_client = Daemon()
 
 
 class Format(enum.StrEnum):

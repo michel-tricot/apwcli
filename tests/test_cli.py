@@ -31,7 +31,7 @@ def test_help_and_version_work_off_macos(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "apwcli.cli.client.daemon.status",
+        "apwcli.cli.common.daemon_client.status",
         lambda: {"running": False, "bridge": False, "paired": False},
     )
     result = runner.invoke(app, ["daemon", "status"])
@@ -42,10 +42,10 @@ def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     # restart must surface _spawn's "no supported browser" preflight as a clean CLI
     # error with an install hint, not an uncaught traceback.
-    from apwcli.cli.common import client
+    from apwcli.cli.common import daemon_client
 
-    monkeypatch.setattr(client.daemon, "stop", lambda: False)  # don't touch a real daemon
-    monkeypatch.setattr(client.daemon, "_wait_stopped", lambda *a, **k: True)
+    monkeypatch.setattr(daemon_client, "stop", lambda: False)  # don't touch a real daemon
+    monkeypatch.setattr(daemon_client, "_wait_stopped", lambda *a, **k: True)
     monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
     result = runner.invoke(app, ["daemon", "restart"])
     assert result.exit_code == 1
@@ -56,7 +56,7 @@ def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.Monkey
 
 def test_daemon_status_shows_daemon_and_pairing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "apwcli.cli.client.daemon.status",
+        "apwcli.cli.common.daemon_client.status",
         lambda: {"running": True, "bridge": True, "paired": True},
     )
     result = runner.invoke(app, ["daemon", "status"])
@@ -65,11 +65,60 @@ def test_daemon_status_shows_daemon_and_pairing(monkeypatch: pytest.MonkeyPatch)
     assert "pairing" in result.stdout and "paired" in result.stdout
 
 
+def test_daemon_status_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    st = {"running": True, "bridge": True, "paired": False, "browser": "Brave", "browser_pid": 7}
+    monkeypatch.setattr("apwcli.cli.common.daemon_client.status", lambda: st)
+    result = runner.invoke(app, ["daemon", "status", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == st
+
+
+def test_daemon_start_browser_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> None:
+    # -b picks the browser for this daemon only; nothing is persisted to config.
+    from pathlib import Path
+
+    from apwlib.browsers import BrowserInfo
+
+    started: list = []
+    config_writes: list = []
+    monkeypatch.setattr(
+        "apwcli.cli.daemon.resolve_browser",
+        lambda _s: BrowserInfo(id="chrome", name="Chrome", binary=Path("/x")),
+    )
+    monkeypatch.setattr("apwcli.cli.common.daemon_client.start", lambda b=None: started.append(b))
+    monkeypatch.setattr(
+        "apwcli.cli.common.daemon_client.status",
+        lambda: {"running": True, "bridge": True, "paired": False},
+    )
+    monkeypatch.setattr("apwlib.config.write_config", lambda patch: config_writes.append(patch) or patch)
+    result = runner.invoke(app, ["daemon", "start", "-b", "Chrome"])
+    assert result.exit_code == 0
+    assert started == ["chrome"]
+    assert config_writes == []
+
+
+def test_otp_get_filters_by_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import OTPEntry
+
+    entries = [
+        OTPEntry(username="a@example.com", domain="github.com", code="111111"),
+        OTPEntry(username="b@example.com", domain="github.com", code="222222"),
+    ]
+    copied: list[bytes] = []
+    monkeypatch.setattr("apwcli.cli.client.get_otp", lambda _url: entries)
+    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input))
+    result = runner.invoke(app, ["otp", "get", "github.com", "b@example.com", "-c", "--clear-after", "0"])
+    assert result.exit_code == 0
+    assert copied == [b"222222"]  # the username narrows an otherwise ambiguous copy
+
+
 def test_pw_list_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
-    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
     result = runner.invoke(app, ["pw", "list", "github.com", "--format", "text"])
     assert result.exit_code == 0
     assert "me@example.com\tgithub.com" in result.stdout
@@ -79,7 +128,7 @@ def test_pw_list_json_format(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com")]
-    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
     result = runner.invoke(app, ["pw", "list", "github.com", "--format", "json"])
     assert result.exit_code == 0
     assert '"results"' in result.stdout and "me@example.com" in result.stdout
@@ -89,7 +138,7 @@ def test_pw_list_table_omits_empty_password_column(monkeypatch: pytest.MonkeyPat
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password=None)]
-    monkeypatch.setattr("apwcli.cli.client.get_login_names", lambda _url: entries)
+    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
     result = runner.invoke(app, ["pw", "list", "github.com"])
     assert result.exit_code == 0
     assert "username" in result.stdout
@@ -175,7 +224,7 @@ def test_clipboard_clear_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pw_generate_saves_and_shows(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, str, str]] = []
-    monkeypatch.setattr("apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw)))
+    monkeypatch.setattr("apwcli.cli.client.save_password", lambda u, user, pw: saved.append((u, user, pw)))
     result = runner.invoke(app, ["pw", "generate", "example.com", "me@example.com", "-n", "24", "--show"])
     assert result.exit_code == 0
     assert len(saved) == 1 and saved[0][:2] == ("example.com", "me@example.com")
@@ -186,7 +235,7 @@ def test_pw_generate_saves_and_shows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pw_generate_does_not_show_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list = []
-    monkeypatch.setattr("apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw)))
+    monkeypatch.setattr("apwcli.cli.client.save_password", lambda u, user, pw: saved.append((u, user, pw)))
     result = runner.invoke(app, ["pw", "generate", "example.com", "me@example.com"])
     assert result.exit_code == 0
     assert saved[0][2] not in result.stdout  # saved, not printed
@@ -230,7 +279,7 @@ def test_version_names_both_packages() -> None:
 
 def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, str, str]] = []
-    monkeypatch.setattr("apwcli.cli.client.save_account", lambda url, user, pw: saved.append((url, user, pw)))
+    monkeypatch.setattr("apwcli.cli.client.save_password", lambda url, user, pw: saved.append((url, user, pw)))
     result = runner.invoke(app, ["pw", "save", "example.com", "me@example.com"], input="s3cret\n")
     assert result.exit_code == 0
     assert saved == [("example.com", "me@example.com", "s3cret")]
@@ -242,7 +291,7 @@ def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(_url: str):
         raise DaemonNotRunningError()
 
-    monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
+    monkeypatch.setattr("apwcli.cli.client.list_accounts", boom)
     result = runner.invoke(app, ["pw", "list", "https://github.com"])
     assert result.exit_code == 9
 
@@ -253,7 +302,7 @@ def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(_url: str):
         raise NotPairedError("session is not paired")
 
-    monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
+    monkeypatch.setattr("apwcli.cli.client.list_accounts", boom)
     result = runner.invoke(app, ["pw", "list", "github.com"])
     assert result.exit_code == 9
     assert "apwcli daemon pair" in result.stderr

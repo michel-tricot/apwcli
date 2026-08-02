@@ -18,7 +18,7 @@ class PasswordEntry:
     high_level_domain: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: dict[str, Any]) -> PasswordEntry:
+    def _from_raw(cls, raw: dict[str, Any]) -> PasswordEntry:
         sites = raw.get("sites") or []
         pwd = raw.get("PWD")
         return cls(
@@ -39,7 +39,7 @@ class OTPEntry:
     source: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: dict[str, Any]) -> OTPEntry:
+    def _from_raw(cls, raw: dict[str, Any]) -> OTPEntry:
         return cls(
             username=raw.get("username", ""),
             domain=raw.get("domain", ""),

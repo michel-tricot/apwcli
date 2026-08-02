@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -12,14 +13,14 @@ from apwcli.cli import app
 
 runner = CliRunner()
 
-_BROWSER = BrowserInfo(id="brave", name="Brave", binary=Path("/x"), data_dir=None)
+_BROWSER = BrowserInfo(id="brave", name="Brave", binary=Path("/x"))
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, *, browsers, manifest, version, status) -> None:
-    monkeypatch.setattr("apwcli.cli.doctor.installed_browsers", lambda: browsers)
-    monkeypatch.setattr("apwcli.cli.doctor.cached_extension_version", lambda: version)
-    monkeypatch.setattr("apwcli.cli.doctor.APPLE_NATIVE_MANIFEST", manifest)
-    monkeypatch.setattr("apwcli.cli.client.daemon.status", lambda: status)
+    monkeypatch.setattr("apwlib.diagnostics.installed_browsers", lambda: browsers)
+    monkeypatch.setattr("apwlib.diagnostics.cached_extension_version", lambda: version)
+    monkeypatch.setattr("apwlib.diagnostics.APPLE_NATIVE_MANIFEST", manifest)
+    monkeypatch.setattr("apwcli.cli.common.daemon_client.status", lambda: status)
 
 
 def test_doctor_all_green(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -53,7 +54,7 @@ def test_doctor_fails_without_browser(monkeypatch: pytest.MonkeyPatch, tmp_path:
         browsers=[],
         manifest=manifest,
         version="3.3.0",
-        status={"running": False, "bridge": False, "paired": False},
+        status={"running": False, "bridge": False, "paired": False, "browser": None, "browser_pid": None},
     )
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
@@ -69,7 +70,7 @@ def test_doctor_extension_not_cached_is_not_a_failure(monkeypatch: pytest.Monkey
         browsers=[_BROWSER],
         manifest=manifest,
         version=None,
-        status={"running": False, "bridge": False, "paired": False},
+        status={"running": False, "bridge": False, "paired": False, "browser": None, "browser_pid": None},
     )
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0  # the daemon downloads it from the store on start
@@ -84,8 +85,27 @@ def test_doctor_unpaired_is_not_a_failure(monkeypatch: pytest.MonkeyPatch, tmp_p
         browsers=[_BROWSER],
         manifest=manifest,
         version="3.3.0",
-        status={"running": True, "bridge": True, "paired": False},
+        status={"running": True, "bridge": True, "paired": False, "browser": "Brave", "browser_pid": 7},
     )
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0  # prerequisites are fine; pairing is on-demand
     assert "not paired" in result.stdout
+
+
+def test_doctor_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    manifest = tmp_path / "m.json"  # absent -> apple_helper check fails
+    _stub(
+        monkeypatch,
+        browsers=[_BROWSER],
+        manifest=manifest,
+        version=None,
+        status={"running": False, "bridge": False, "paired": False, "browser": None, "browser_pid": None},
+    )
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 1  # a required check failed; JSON says which
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    by_key = {c["key"]: c for c in payload["checks"]}
+    assert by_key["browser"]["ok"] is True
+    assert by_key["apple_helper"]["ok"] is False and by_key["apple_helper"]["required"] is True
+    assert by_key["apple_helper"]["hint"]

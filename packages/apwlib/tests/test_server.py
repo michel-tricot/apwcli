@@ -212,7 +212,7 @@ async def test_pair_ops_forward_bridge_errors() -> None:
     assert (await bridge.pair_verify("123456"))["error"] == server.WIRE_NO_BRIDGE
 
 
-_BROWSER = BrowserInfo(id="brave", name="Brave", binary=Path("/x"), data_dir=None)
+_BROWSER = BrowserInfo(id="brave", name="Brave", binary=Path("/x"))
 
 
 @pytest.mark.anyio

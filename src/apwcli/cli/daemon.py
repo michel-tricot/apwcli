@@ -3,54 +3,55 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import subprocess
 
 import typer
 from apwlib import ApwError, Status
 from apwlib.browsers import resolve_browser
-from apwlib.config import write_config
-from apwlib.paths import LOG_PATH
 
-from apwcli.cli.common import _prompt_pin, client, daemon_app, fail, render_status, status_line
+from apwcli.cli.common import _prompt_pin, daemon_app, daemon_client, fail, render_status, status_line
 
 
-def _require_ready(ready: bool) -> None:
-    """Fail if the daemon didn't come up, pointing at the log."""
-    if not ready:
-        fail(ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log"))
+def _validated_browser(browser: str | None) -> str | None:
+    """The lowercased browser id to use for this invocation, or None for auto/config."""
+    if not browser:
+        return None
+    if resolve_browser(browser.lower()) is None:
+        fail(ApwError(Status.INVALID_PARAM, f"browser not available: {browser}"))
+    return browser.lower()
 
 
 @daemon_app.command("start")
 def daemon_start(
-    browser: str = typer.Option(None, "--browser", "-b", help="Browser to manage (auto, chromium, chrome, brave)."),
+    browser: str = typer.Option(None, "--browser", "-b", help="Browser to manage for this daemon (auto, chromium, chrome, brave, edge)."),
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
-    if browser:
-        # Validate before persisting: a bad id written to config would make every
-        # later start spawn a daemon that dies on startup.
-        if resolve_browser(browser.lower()) is None:
-            fail(ApwError(Status.INVALID_PARAM, f"browser not available: {browser}"))
-        write_config({"browser": browser.lower()})
+    chosen = _validated_browser(browser)
 
     if foreground:
         from apwlib.daemon.__main__ import main as run_foreground
 
-        raise typer.Exit(code=run_foreground())
+        raise typer.Exit(code=run_foreground([chosen] if chosen else []))
 
     try:
-        ready = client.daemon.start()  # spawn detached + wait for the bridge
-    except ApwError as exc:  # e.g. no supported browser installed
+        daemon_client.start(chosen)  # spawn detached + wait for the bridge
+    except ApwError as exc:  # no supported browser, or the bridge never came up
         fail(exc)
-    render_status(client.daemon.status())
-    _require_ready(ready)
+    render_status(daemon_client.status())
 
 
 @daemon_app.command("status")
-def daemon_status() -> None:
+def daemon_status(
+    as_json: bool = typer.Option(False, "--json", help="Print the status as JSON."),
+) -> None:
     """Report daemon and pairing state."""
-    st = client.daemon.status()
-    render_status(st)
+    st = daemon_client.status()
+    if as_json:
+        typer.echo(json.dumps(st))
+    else:
+        render_status(st)
     # render_status already showed the red dots; exit non-zero for scripts without a
     # second, redundant `error: …` line (hence a bare Exit, not fail()).
     if not st["running"]:
@@ -60,19 +61,21 @@ def daemon_status() -> None:
 @daemon_app.command("stop")
 def daemon_stop() -> None:
     """Stop the running daemon (and its managed browser)."""
-    stopped = client.daemon.stop()
+    stopped = daemon_client.stop()
     status_line("daemon stopped" if stopped else "no daemon was running", ok=stopped)
 
 
 @daemon_app.command("restart")
-def daemon_restart() -> None:
+def daemon_restart(
+    browser: str = typer.Option(None, "--browser", "-b", help="Browser to manage for this daemon (auto, chromium, chrome, brave, edge)."),
+) -> None:
     """Stop any running daemon and start a fresh one (fixes a wedged daemon)."""
+    chosen = _validated_browser(browser)
     try:
-        ready = client.daemon.restart()
-    except ApwError as exc:  # e.g. no supported browser installed
+        daemon_client.restart(chosen)
+    except ApwError as exc:  # no supported browser, or the bridge never came up
         fail(exc)
-    render_status(client.daemon.status())
-    _require_ready(ready)
+    render_status(daemon_client.status())
 
 
 @daemon_app.command("logs")
@@ -82,19 +85,20 @@ def daemon_logs(
     clear: bool = typer.Option(False, "--clear", help="Truncate the log and exit."),
 ) -> None:
     """Show the daemon log (~/.apwlib/daemon.log)."""
+    log_path = daemon_client.log_path
     if clear:
-        if LOG_PATH.exists():
-            LOG_PATH.write_text("")
+        if log_path.exists():
+            log_path.write_text("")
         status_line("log cleared")
         return
-    if not LOG_PATH.exists():
+    if not log_path.exists():
         status_line("no daemon log yet", ok=False)
         return
     if follow:
         with contextlib.suppress(KeyboardInterrupt):
-            subprocess.run(["tail", "-f", "-n", str(lines or 10), str(LOG_PATH)], check=False)
+            subprocess.run(["tail", "-f", "-n", str(lines or 10), str(log_path)], check=False)
         return
-    entries = LOG_PATH.read_text().splitlines()
+    entries = log_path.read_text().splitlines()
     for line in entries[-lines:] if lines else entries:
         typer.echo(line)
 
@@ -107,13 +111,13 @@ def daemon_pair(
     # Narrate each phase: auto-start, the PIN window, and verification can each
     # take seconds to minutes with nothing on screen, which reads as a hang.
     try:
-        if not client.daemon.status()["running"]:
+        if not daemon_client.status()["running"]:
             status_line("starting the daemon (takes a few seconds)")
-        client.daemon.request_challenge()
+        daemon_client.request_challenge()
         status_line("pairing code requested — macOS is displaying it")
         code = pin or _prompt_pin()
         status_line("verifying")
-        paired = client.daemon.verify_challenge(code)
+        paired = daemon_client.verify_challenge(code)
     except ApwError as exc:
         fail(exc)
     if not paired:

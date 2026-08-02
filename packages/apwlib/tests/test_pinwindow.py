@@ -55,7 +55,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, fake_cls: type[_FakeWindow]) -> li
 
 @pytest.fixture
 def fake_browser(monkeypatch: pytest.MonkeyPatch) -> BrowserInfo:
-    browser = BrowserInfo(id="fake", name="Fake", binary=Path("/fake"), data_dir=None)
+    browser = BrowserInfo(id="fake", name="Fake", binary=Path("/fake"))
     monkeypatch.setattr(pinwindow, "resolve_browser", lambda _selected: browser)
     return browser
 

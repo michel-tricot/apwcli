@@ -11,8 +11,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from apwlib import ApplePasswords
-from apwlib.client import DaemonStatus
+from apwlib import ApplePasswords, Daemon, DaemonStatus
 from fastmcp import FastMCP
 
 
@@ -30,28 +29,29 @@ def build_server(allow_passwords: bool = False) -> FastMCP:
         ),
     )
     client = ApplePasswords()
+    daemon = Daemon()
 
     @server.tool
     def status() -> DaemonStatus:
         """Daemon, browser-extension, and pairing state."""
-        return client.daemon.status()
+        return daemon.status()
 
     @server.tool
     def start_pairing() -> str:
         """Begin pairing: macOS displays a 6-digit PIN on the user's screen."""
-        client.daemon.start()
-        client.daemon.request_challenge()
+        daemon.start()
+        daemon.request_challenge()
         return "macOS is showing a 6-digit PIN. Ask the user for it, then call submit_pin."
 
     @server.tool
     def submit_pin(pin: str) -> dict[str, bool]:
         """Complete pairing with the PIN the user read from the macOS dialog."""
-        return {"paired": client.daemon.verify_challenge(pin)}
+        return {"paired": daemon.verify_challenge(pin)}
 
     @server.tool
     def list_accounts(url: str) -> list[dict[str, Any]]:
         """List the accounts saved for a site (usernames only, never passwords)."""
-        rows = _rows(client.get_login_names(url))
+        rows = _rows(client.list_accounts(url))
         for row in rows:
             row.pop("password", None)  # defense in depth; ghost search omits it anyway
         return rows
@@ -64,7 +64,7 @@ def build_server(allow_passwords: bool = False) -> FastMCP:
     @server.tool
     def save_password(url: str, username: str, password: str) -> str:
         """Create or update a credential in Apple Passwords."""
-        client.save_account(url, username, password)
+        client.save_password(url, username, password)
         return "saved"
 
     if allow_passwords:

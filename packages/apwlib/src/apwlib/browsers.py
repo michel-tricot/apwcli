@@ -1,25 +1,38 @@
 """Approved browsers for hosting the extension and the PIN window.
 
 Discovery is chauffeur's job, and its Chromium-family catalog (chrome, chromium,
-brave, edge) is exactly the set apwlib supports — so this module re-exports
-chauffeur's ``BrowserInfo``/``installed_browsers`` and adds only apwlib's own
-decorations: the managed profile path per browser (:func:`profile_for`) and
-Homebrew casks for install hints (``BREW_CASKS``). Shared by the daemon (which
-manages a headless browser) and the PIN window (which opens an app-mode window).
+brave, edge) is exactly the set apwlib supports. chauffeur stays an implementation
+detail, though: this module wraps its browser records in apwlib's own
+:class:`BrowserInfo` (just ``id``/``name``/``binary``), so a chauffeur upgrade can't
+change apwlib's public shape. It also adds apwlib's own decorations: the managed
+profile path per browser (:func:`profile_for`) and Homebrew casks for install hints
+(``BREW_CASKS``). Shared by the daemon (which manages a headless browser) and the
+PIN window (which opens an app-mode window).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from chauffeur import BrowserInfo, installed_browsers
-from chauffeur.browsers import catalog
+from chauffeur import installed_browsers as _chauffeur_installed
+from chauffeur.browsers import catalog as _chauffeur_catalog
 
 from apwlib.paths import BROWSER_PROFILE_DIR
 
 __all__ = ["BREW_CASKS", "BROWSERS", "BrowserInfo", "installed_browsers", "profile_for", "resolve_browser"]
 
-# Homebrew casks for install hints, keyed by chauffeur's browser ids.
+
+@dataclass(frozen=True)
+class BrowserInfo:
+    """An approved browser: a stable apwlib type independent of chauffeur's records."""
+
+    id: str
+    name: str
+    binary: Path
+
+
+# Homebrew casks for install hints, keyed by browser id.
 BREW_CASKS = {
     "chrome": "google-chrome",
     "chromium": "ungoogled-chromium",
@@ -27,7 +40,12 @@ BREW_CASKS = {
     "edge": "microsoft-edge",
 }
 
-BROWSERS: list[BrowserInfo] = list(catalog())
+BROWSERS: list[BrowserInfo] = [BrowserInfo(id=b.id, name=b.name, binary=b.binary) for b in _chauffeur_catalog()]
+
+
+def installed_browsers() -> list[BrowserInfo]:
+    """The approved browsers actually installed, in catalog order."""
+    return [BrowserInfo(id=b.id, name=b.name, binary=b.binary) for b in _chauffeur_installed()]
 
 
 def profile_for(browser: BrowserInfo) -> Path:

@@ -38,6 +38,13 @@ class DaemonNotRunningError(SessionError):
     """No daemon is reachable on the socket (recoverable by starting one)."""
 
 
+class DaemonStartError(ApwError):
+    """A daemon was spawned but did not become ready (browser/extension trouble)."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(Status.GENERIC_ERROR, message)
+
+
 class NotPairedError(SessionError):
     """The daemon and extension are up, but no PIN pairing has been completed."""
 

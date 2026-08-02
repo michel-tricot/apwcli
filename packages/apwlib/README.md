@@ -35,7 +35,7 @@ pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
 
 # Accounts saved for a site. Matching is by registrable domain: a bare host,
 # a full URL, or a subdomain all resolve to the same accounts.
-for account in pw.get_login_names("github.com"):
+for account in pw.list_accounts("github.com"):
     print(account.username, account.domain, account.title)
 
 # Passwords — narrow with a username, or omit it for every match.
@@ -44,7 +44,7 @@ for entry in pw.get_password("github.com", "me@example.com"):
     print(entry.username, "->", entry.password)
 
 # Create or update a credential.
-pw.save_account("example.com", "me@example.com", "s3cret-passw0rd")
+pw.save_password("example.com", "me@example.com", "s3cret-passw0rd")
 
 # One-time codes: what's available, and the current code.
 for code in pw.list_otp("github.com"):
@@ -55,7 +55,7 @@ for code in pw.get_otp("github.com"):
 # The paired session lives in the browser and can drop; catch SessionError
 # to re-pair, or ApwError for anything protocol-level.
 try:
-    pw.get_login_names("github.com")
+    pw.list_accounts("github.com")
 except SessionError:
     print("session dropped — pair again")
 except ApwError as exc:
@@ -68,14 +68,14 @@ Pairing needs a 6-digit PIN that macOS displays, once per daemon lifetime.
 A `pin_provider` callback handles it transparently; to drive it explicitly:
 
 ```python
-from apwlib import ApplePasswords
+from apwlib import Daemon
 
-pw = ApplePasswords()
-pw.daemon.request_challenge()  # macOS shows a 6-digit PIN
-paired = pw.daemon.verify_challenge(input("PIN: "))  # blocks until settled
+daemon = Daemon()
+daemon.request_challenge()  # macOS shows a 6-digit PIN
+paired = daemon.verify_challenge(input("PIN: "))  # blocks until settled
 ```
 
-`pw.daemon` also exposes `start()`, `stop()`, and `status()`. A pairing cannot
+`Daemon` also exposes `start()`, `stop()`, `restart()`, and `status()`. A pairing cannot
 outlive the daemon (the helper issues a fresh PIN per handshake by design), so
 keeping the daemon alive is what keeps the PIN rare.
 
@@ -97,33 +97,24 @@ dropping a replacement at `~/.apwlib/pinwindow.css`.
 
 ## Data model
 
-Reads return dataclasses (`PasswordEntry`, `OTPEntry`). Their shape, without a
-daemon:
+Reads return dataclasses (`PasswordEntry`, `OTPEntry`):
 
 ```python
 from apwlib import PasswordEntry
 
-entry = PasswordEntry.from_raw(
-    {"USR": "me@example.com", "PWD": "hunter2", "sites": ["https://github.com"]}
-)
+entry = PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")
 print(entry.username, entry.domain, entry.password)
-#> me@example.com https://github.com hunter2
+#> me@example.com github.com hunter2
 ```
 
-A password the vault withholds (`"Not Included"`) becomes `None`:
-
-```python
-from apwlib import PasswordEntry
-
-entry = PasswordEntry.from_raw({"USR": "a", "PWD": "Not Included", "sites": ["x"]})
-print(entry.password)
-#> None
-```
+`PasswordEntry.password` is `None` when the vault withholds it (e.g. from
+`list_accounts`, which never carries passwords).
 
 ## Errors
 
 Every failure raises `ApwError` (or a subclass — `SessionError`,
-`DaemonNotRunningError`, `NotPairedError`, `ServerError`) carrying a `Status`:
+`DaemonNotRunningError`, `NotPairedError`, `DaemonStartError`, `ServerError`)
+carrying a `Status`:
 
 ```python
 from apwlib import SessionError

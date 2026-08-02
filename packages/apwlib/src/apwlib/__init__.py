@@ -1,9 +1,12 @@
 """Programmatic access to Apple Passwords (iCloud Keychain) on macOS."""
 
-from apwlib.client import ApplePasswords
+from importlib.metadata import version
+
+from apwlib.client import ApplePasswords, Daemon, DaemonStatus
 from apwlib.errors import (
     ApwError,
     DaemonNotRunningError,
+    DaemonStartError,
     NotPairedError,
     ServerError,
     SessionError,
@@ -14,7 +17,10 @@ from apwlib.protocol import Status
 __all__ = [
     "ApplePasswords",
     "ApwError",
+    "Daemon",
     "DaemonNotRunningError",
+    "DaemonStartError",
+    "DaemonStatus",
     "NotPairedError",
     "OTPEntry",
     "PasswordEntry",
@@ -22,4 +28,4 @@ __all__ = [
     "SessionError",
     "Status",
 ]
-__version__ = "0.1.0"
+__version__ = version("apwlib")

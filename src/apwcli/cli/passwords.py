@@ -42,7 +42,7 @@ def _generate_password(length: int, symbols: bool) -> str:
 def pw_list(url: str, fmt: FormatOption = Format.table) -> None:
     """List accounts saved for a URL."""
     try:
-        emit(client.get_login_names(url), fmt)
+        emit(client.list_accounts(url), fmt)
     except ApwError as exc:
         fail(exc, fmt)
 
@@ -58,7 +58,7 @@ def pw_get(
 ) -> None:
     """Get password(s) for a URL."""
     try:
-        entries = client.get_password(url, username)
+        entries = client.get_password(url, username or None)
     except ApwError as exc:
         fail(exc, fmt)
     if clipboard:
@@ -77,7 +77,7 @@ def pw_save(
     piped = stdin or not sys.stdin.isatty()  # piped input can't answer a prompt
     password = sys.stdin.read().strip() if piped else typer.prompt("Enter password", hide_input=True)
     try:
-        client.save_account(url, username, password)
+        client.save_password(url, username, password)
     except ApwError as exc:
         fail(exc)
     status_line("saved")
@@ -96,7 +96,7 @@ def pw_generate(
     """Generate a strong password, save it, and (optionally) reveal or copy it."""
     password = _generate_password(length, symbols)
     try:
-        client.save_account(url, username, password)
+        client.save_password(url, username, password)
     except ApwError as exc:
         fail(exc)
     status_line("saved")
