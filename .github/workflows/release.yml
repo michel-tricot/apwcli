@@ -49,7 +49,11 @@ jobs:
         run: uv publish --trusted-publishing always
 
       - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*
+        # Skip if it already exists so a rerun of a partially-failed job can
+        # proceed to the tap step instead of dying here.
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --generate-notes dist/*
         env:
           GH_TOKEN: ${{ github.token }}
 
