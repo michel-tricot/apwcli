@@ -2,19 +2,23 @@
 //
 // It runs inside the extension, so it can use the extension globals that implement
 // Apple's crypto (`g_secretSession`, `g_nativeAppPort`) and pairing (`ChallengePIN`,
-// `PINSet`). It dials the daemon's WebSocket server and proxies:
+// `PINSet`). It talks to the daemon over chauffeur's `py_chauffeur` channel, which
+// chauffeur installs in this worker before this code runs:
 //
-//   - `cmd:2` messages drive pairing (challenge / PIN), answered immediately.
-//   - other commands are encrypted with `SecretSession.createSMSG` and posted to the
-//     native helper; the helper's encrypted reply is decrypted with `parseSMSG`.
-//   - it reports pairing state (`{paired}`) so the daemon can answer status queries.
-//
-// `globalThis.__chauffeur_config` (port + token) is injected ahead of this script by
-// chauffeur (`ExtensionSpec.inject_config`, see extension.py).
+//   - the daemon drives one handler, `py_chauffeur.on("request", …)`, and awaits its
+//     result — no id correlation, reconnect, or socket to manage here.
+//   - `cmd:2` requests drive pairing (challenge / PIN), answered immediately.
+//   - other requests are encrypted with `SecretSession.createSMSG`, posted to the
+//     native helper, and the request resolves when the helper's encrypted reply
+//     arrives and is decrypted with `parseSMSG`.
+//   - the daemon pulls pairing state on demand via `py_chauffeur.on("status", …)`,
+//     which reads `g_theState` live. Pulling (not pushing) is race-free: a poll
+//     reads the current truth, and if the worker is mid-handshake the read simply
+//     queues behind the crypto and returns the settled state.
 //
 // Hardening rules (this worker holds the SRP pairing — if it dies, the user must re-PIN):
-//   * NOTHING may throw out of an event handler. Every extension/native/WebSocket call is
-//     wrapped, and global error/rejection handlers swallow stragglers.
+//   * NOTHING may throw out of a handler. Every extension/native call is wrapped, and
+//     global error/rejection handlers swallow stragglers.
 //   * Malformed requests are rejected up front — they never reach the crypto/native layer.
 //   * Every reference to an extension global is `typeof`-guarded (undeclared globals would
 //     otherwise raise ReferenceError and tear the worker down).
@@ -24,20 +28,13 @@
 (function apwBridge() {
   "use strict";
 
-  const cfg = (typeof globalThis !== "undefined" && globalThis.__chauffeur_config) || {};
-  const port = cfg.port;
-  const token = cfg.token;
-
   const OK = 0;
   const INVALID_PARAM = 2;
   const INVALID_SESSION = 9;
   const SERVER_ERROR = 100;
   const NATIVE_TIMEOUT_MS = 25000; // below the daemon's 30s request timeout
-  const RECONNECT_MS = 3000;
 
-  let ws = null;
-  let pending = null; // { id, cmd, timer }
-  let reconnectTimer = null;
+  let pending = null; // { resolve, cmd, timer }
 
   // Keep the worker alive: swallow stray errors/rejections rather than let the runtime
   // tear it down (which would drop the pairing).
@@ -55,19 +52,13 @@
     /* ignore */
   }
 
-  const isOpen = () => !!ws && ws.readyState === WebSocket.OPEN;
-
-  function send(message) {
-    if (!isOpen()) return;
-    try {
-      ws.send(JSON.stringify(message));
-    } catch (_e) {
-      /* ignore */
-    }
-  }
-
-  function fail(id, status, error) {
-    if (id != null) send({ id: id, status: status, error: String(error) });
+  // The live pairing state, read on demand. Reports the raw handshake state too: it
+  // lets the client tell a collapsed handshake (back to NotInSession after a verify —
+  // e.g. a wrong PIN) from one still in progress, so it can fail fast instead of waiting
+  // out the pairing timeout.
+  function readState() {
+    const state = typeof g_theState !== "undefined" ? g_theState : null;
+    return { paired: state === "SessionKeySet", state: state };
   }
 
   function clearPending() {
@@ -84,7 +75,7 @@
   function pair(message) {
     try {
       if (message.pin == null) {
-        if (typeof ChallengePIN !== "function") return fail(message.id, SERVER_ERROR, "pairing unavailable");
+        if (typeof ChallengePIN !== "function") return { status: SERVER_ERROR, error: "pairing unavailable" };
         // ChallengePIN() only starts a handshake from NotInSession; from any other state it
         // is a silent no-op. So reset to NotInSession first from ANY active state — a parked
         // mid-handshake (ChallengeSent/MSG1Set) OR an existing pairing (SessionKeySet).
@@ -101,18 +92,19 @@
         }
         ChallengePIN();
       } else {
-        if (typeof PINSet !== "function") return fail(message.id, SERVER_ERROR, "pairing unavailable");
+        if (typeof PINSet !== "function") return { status: SERVER_ERROR, error: "pairing unavailable" };
         PINSet(String(message.pin));
       }
-      send({ id: message.id, status: OK });
+      return { status: OK };
     } catch (error) {
-      fail(message.id, SERVER_ERROR, error);
+      return { status: SERVER_ERROR, error: String(error) };
     }
   }
 
-  function request(message) {
-    if (!message || typeof message !== "object") return;
-    const id = message.id;
+  // The daemon's single command. Resolves to a response object: `{ data }` on success,
+  // `{ status, error }` on failure — the same shape the client keys on.
+  async function request(message) {
+    if (!message || typeof message !== "object") return { status: INVALID_PARAM, error: "malformed request" };
 
     if (message.cmd === 2) return pair(message);
 
@@ -123,153 +115,85 @@
       !message.body ||
       typeof message.body !== "object"
     ) {
-      return fail(id, INVALID_PARAM, "malformed request");
+      return { status: INVALID_PARAM, error: "malformed request" };
     }
     if (typeof g_secretSession === "undefined" || !g_secretSession) {
-      return fail(id, INVALID_SESSION, "extension not ready");
+      return { status: INVALID_SESSION, error: "extension not ready" };
     }
     if (typeof g_nativeAppPort === "undefined" || !g_nativeAppPort) {
-      return fail(id, INVALID_SESSION, "extension not ready");
+      return { status: INVALID_SESSION, error: "extension not ready" };
     }
     if (typeof g_theState === "undefined" || g_theState !== "SessionKeySet") {
-      return fail(id, INVALID_SESSION, "unpaired");
+      return { status: INVALID_SESSION, error: "unpaired" };
     }
     if (pending) {
       // The daemon serializes requests, so this is defensive only.
-      return fail(id, SERVER_ERROR, "busy");
+      return { status: SERVER_ERROR, error: "busy" };
     }
 
     let smsg;
     try {
       smsg = g_secretSession.createSMSG(JSON.stringify(message.body));
     } catch (error) {
-      return fail(id, SERVER_ERROR, error);
+      return { status: SERVER_ERROR, error: String(error) };
     }
 
-    pending = {
-      id: id,
-      cmd: message.cmd,
-      timer: setTimeout(() => {
-        const stuck = pending;
-        clearPending();
-        if (stuck) fail(stuck.id, SERVER_ERROR, "native helper timed out");
-      }, NATIVE_TIMEOUT_MS),
-    };
-
-    try {
-      g_nativeAppPort.postMessage({
+    return await new Promise((resolve) => {
+      pending = {
+        resolve: resolve,
         cmd: message.cmd,
-        tabId: message.tabId,
-        frameId: message.frameId,
-        url: message.url,
-        payload: JSON.stringify({ QID: message.qid, SMSG: smsg }),
-      });
-    } catch (error) {
-      clearPending();
-      fail(id, SERVER_ERROR, error);
-    }
-  }
-
-  function reportState() {
-    const state = typeof g_theState !== "undefined" ? g_theState : null;
-    // Report the raw handshake state too: it lets the client tell a collapsed handshake
-    // (back to NotInSession after a verify — e.g. a wrong PIN) from one still in progress,
-    // so it can fail fast instead of waiting out the pairing timeout.
-    send({ paired: state === "SessionKeySet", state: state });
+        timer: setTimeout(() => {
+          const stuck = pending;
+          clearPending();
+          if (stuck) stuck.resolve({ status: SERVER_ERROR, error: "native helper timed out" });
+        }, NATIVE_TIMEOUT_MS),
+      };
+      try {
+        g_nativeAppPort.postMessage({
+          cmd: message.cmd,
+          tabId: message.tabId,
+          frameId: message.frameId,
+          url: message.url,
+          payload: JSON.stringify({ QID: message.qid, SMSG: smsg }),
+        });
+      } catch (error) {
+        clearPending();
+        resolve({ status: SERVER_ERROR, error: String(error) });
+      }
+    });
   }
 
   function reply(message) {
     if (!message || typeof message !== "object") return;
-    if (message.cmd === 14) {
-      reportState(); // the capability hello rebuilds SecretSession — report the fresh state
-      return;
-    }
-    reportState(); // keep the daemon's view of pairing state current
     if (!pending) return;
     const matches = message.cmd === pending.cmd || (pending.cmd === 6 && message.cmd === 4);
     if (!matches) return;
-    const id = pending.id;
+    const resolve = pending.resolve;
     clearPending();
     try {
       const data = message.payload
         ? JSON.parse(g_secretSession.parseSMSG(message.payload.SMSG))
         : { STATUS: typeof message.STATUS === "number" ? message.STATUS : OK };
-      send({ id: id, data: data });
+      resolve({ data: data });
     } catch (error) {
-      fail(id, SERVER_ERROR, error);
+      resolve({ status: SERVER_ERROR, error: String(error) });
     }
   }
 
-  function scheduleReconnect() {
-    if (reconnectTimer) return;
-    reconnectTimer = setTimeout(connect, RECONNECT_MS);
-  }
-
-  function connect() {
-    reconnectTimer = null;
-    try {
-      ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    } catch (_e) {
-      scheduleReconnect();
-      return;
-    }
-    ws.onopen = () => {
-      send({ token: token });
-      reportState();
-    };
-    ws.onerror = () => {
-      try {
-        ws.close();
-      } catch (_e) {
-        /* ignore */
-      }
-    };
-    ws.onclose = () => {
-      clearPending();
-      scheduleReconnect();
-    };
-    ws.onmessage = (event) => {
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch (_e) {
-        return; // ignore non-JSON frames
-      }
-      try {
-        request(message);
-      } catch (error) {
-        fail(message && message.id, SERVER_ERROR, error);
-      }
-    };
-  }
-
-  // Keep the service worker alive. MV3 evicts an idle worker (~30s); eviction would
-  // silently drop the pairing and the bridge, and the reconnect timer dies with the
-  // worker. A periodic no-op API call resets the idle timer, and we redial the socket
-  // if it has dropped. Permission-free (getPlatformInfo needs none), so no manifest
-  // change — works across Chromium versions.
-  const KEEPALIVE_MS = 20000; // under the ~30s idle-eviction window
-  function keepAlive() {
-    try {
-      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getPlatformInfo) {
-        chrome.runtime.getPlatformInfo(() => {});
-      }
-    } catch (_e) {
-      /* ignore */
-    }
-    if (!isOpen()) {
-      try {
-        connect();
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-  }
+  // Register the daemon-facing handlers. chauffeur installs py_chauffeur in this worker
+  // before this script runs, so the channel is ready here. "status" is pulled by the
+  // daemon to read live pairing state; "request" carries commands and pairing.
   try {
-    setInterval(keepAlive, KEEPALIVE_MS);
+    py_chauffeur.on("status", readState);
+    py_chauffeur.on("request", request);
   } catch (_e) {
     /* ignore */
   }
+
+  // Keeping the worker alive (so the pairing isn't dropped) is chauffeur's job:
+  // the spec's keep_alive (see extension.py) pokes this worker from Python on a
+  // short interval — reliable, unlike an in-worker setInterval that MV3 suspends
+  // on a dormant worker.
 
   // Ensure the native port exists and route its replies to us.
   try {
@@ -289,6 +213,4 @@
   } catch (_e) {
     /* ignore */
   }
-
-  connect();
 })();

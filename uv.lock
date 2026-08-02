@@ -98,14 +98,10 @@ version = "0.1.0"
 source = { editable = "packages/apwlib" }
 dependencies = [
     { name = "chauffeur" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "chauffeur", specifier = ">=0.9" },
-    { name = "websockets", specifier = ">=13" },
-]
+requires-dist = [{ name = "chauffeur", specifier = ">=0.14.0" }]
 
 [[package]]
 name = "attrs"
@@ -296,14 +292,14 @@ wheels = [
 
 [[package]]
 name = "chauffeur"
-version = "0.9.0"
+version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/5e/d8996776a654dbcc1343649b3e12f09e828c76cc03bbe5185d5933b7d0f8/chauffeur-0.9.0.tar.gz", hash = "sha256:52180cbefc87af2b991f63a7b8fc4fdeea855cd9fe64e2c4ccba2d12aa70a559", size = 92808, upload-time = "2026-08-01T07:20:46.763Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/27/0878286ded7a3846bbba776b45b98850df016613a2fba8c10bbe4e6e1577/chauffeur-0.14.0.tar.gz", hash = "sha256:41660ee68713a83b20f484da795cd9b609d0adbfdafa0412d063107dcacb10a2", size = 109081, upload-time = "2026-08-02T00:10:47.365Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/59/57ff5632cec82ccbe38d2b799ac78cb24e196d9cf85830903259c3ba0159/chauffeur-0.9.0-py3-none-any.whl", hash = "sha256:d162ac57a8d206dbae8a7e477f44bbd8fa89f2f72052291c3b69dbdfcbbdfc18", size = 31623, upload-time = "2026-08-01T07:20:45.835Z" },
+    { url = "https://files.pythonhosted.org/packages/44/d1/8e4f18b61b1af3b0190f3ab29bd30a55a46d645730831871134fddbe1a9e/chauffeur-0.14.0-py3-none-any.whl", hash = "sha256:989151132745fd18135a17296e7e6fbfb70c271ec7a191c5f83239f111a45ec0", size = 41794, upload-time = "2026-08-02T00:10:46.465Z" },
 ]
 
 [[package]]

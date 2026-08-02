@@ -1,4 +1,4 @@
-"""The extension cache (store download) and the chauffeur spec carrying the bridge."""
+"""The chauffeur extension spec: pure declaration, bridge patches, pinned cache."""
 
 from __future__ import annotations
 
@@ -6,20 +6,23 @@ import shutil
 from pathlib import Path
 
 import pytest
-from apwlib import ApwError
+from apwlib import paths
 from apwlib.daemon import extension
 from chauffeur import build_extension
 from chauffeur.extension import ExtensionNotFoundError
 
 
 def _fake_download(body: str, version: str = "3.3.0"):
-    """A ``download_extension`` stand-in writing a minimal store-shaped extension."""
+    """A ``download_extension`` stand-in writing a minimal extension.
+
+    Mirrors chauffeur's contract: the result is validated and loadable as-is
+    (chauffeur strips ``_metadata`` itself).
+    """
 
     def download(extension_id: str, dest: Path, **_kwargs: object) -> Path:
         if dest.exists():
             shutil.rmtree(dest)
-        (dest / "_metadata").mkdir(parents=True)
-        (dest / "_metadata" / "verified_contents.json").write_text("{}")
+        dest.mkdir(parents=True)
         (dest / "manifest.json").write_text(
             f'{{"name": "iCloud Passwords", "version": "{version}"}}'
         )
@@ -34,63 +37,55 @@ def _download_fails(extension_id: str, dest: Path, **_kwargs: object) -> Path:
 
 
 @pytest.fixture
-def ext_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    target = tmp_path / "extension"
-    monkeypatch.setattr(extension, "EXTENSION_DIR", target)
+def data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the spec's pinned cache (and the version reader) at a temp DATA_DIR."""
+    monkeypatch.setattr(extension, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(paths, "EXTENSION_DIR", tmp_path / f"{extension.EXTENSION_ID}.src")
     monkeypatch.setattr(extension, "BRIDGE_JS", "// bridge")
-    monkeypatch.setattr(extension, "ensure_data_dir", lambda: tmp_path)
-    return target
+    return tmp_path
 
 
-def test_downloads_and_strips_metadata(ext_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(extension, "download_extension", _fake_download("// pristine\n"))
-
-    assert extension._pristine_extension() == ext_dir
-    assert "// pristine" in (ext_dir / "background.js").read_text()
-    # Chrome refuses to load an unpacked extension containing _metadata.
-    assert not (ext_dir / "_metadata").exists()
-
-
-def test_refreshes_cache_on_each_start(ext_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(extension, "download_extension", _fake_download("// v1\n", "3.1.0"))
-    extension._pristine_extension()
-
-    monkeypatch.setattr(extension, "download_extension", _fake_download("// v2\n", "3.2.0"))
-    extension._pristine_extension()
-
-    assert "// v2" in (ext_dir / "background.js").read_text()
-    assert extension.cached_extension_version() == "3.2.0"
-
-
-def test_keeps_cache_when_store_unreachable(ext_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(extension, "download_extension", _fake_download("// cached\n"))
-    extension._pristine_extension()
-
-    monkeypatch.setattr(extension, "download_extension", _download_fails)  # e.g. offline
-    assert extension._pristine_extension() == ext_dir  # must not raise; reuses the cache
-    assert "// cached" in (ext_dir / "background.js").read_text()
-
-
-def test_raises_when_no_cache_and_no_store(ext_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(extension, "download_extension", _download_fails)
-    with pytest.raises(ApwError, match="download"):
-        extension._pristine_extension()
-
-
-def test_spec_builds_config_then_source_then_bridge(
-    ext_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_spec_appends_bridge_after_source(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(extension, "download_extension", _fake_download("// pristine\n"))
+    monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// pristine\n"))
 
-    built = build_extension(extension.extension_spec(4321, "tok"), tmp_path / "build")
+    built = build_extension(extension.extension_spec(), tmp_path / "build")
 
     background = (built / "background.js").read_text()
-    assert '"port": 4321' in background and '"token": "tok"' in background
-    config = background.index("__chauffeur_config")
-    assert config < background.index("// pristine") < background.index("// bridge")
-    # The cached copy stays pristine; patches land only in the build.
-    assert "__chauffeur_config" not in (ext_dir / "background.js").read_text()
+    # The bridge reaches the daemon over chauffeur's worker channel, so nothing is
+    # injected — the store source is followed by the appended bridge.
+    assert background.index("// pristine") < background.index("// bridge")
 
 
-def test_cached_extension_version_absent(ext_dir: Path) -> None:
-    assert extension.cached_extension_version() is None
+def test_spec_pins_cache_where_doctor_looks(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// x\n"))
+
+    build_extension(extension.extension_spec(), tmp_path / "build")
+
+    # The pristine cache landed at EXTENSION_DIR (unpatched), visible to doctor.
+    assert "// bridge" not in (paths.EXTENSION_DIR / "background.js").read_text()
+    assert paths.cached_extension_version() == "3.3.0"
+
+
+def test_spec_construction_does_no_io(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("chauffeur.extension.download_extension", _download_fails)
+    extension.extension_spec()  # must not raise: the download is deferred to build
+
+
+def test_spec_keeps_worker_awake_aggressively(data_dir: Path) -> None:
+    # The worker holds a live SRP session that collapses within ~5s of dormancy;
+    # chauffeur's eviction-safe default (25s) is far too slow for that.
+    assert extension.extension_spec().keep_alive == 2.0
+
+
+def test_cached_extension_version_absent(data_dir: Path) -> None:
+    assert paths.cached_extension_version() is None
+
+
+def test_cached_extension_version_tolerates_non_object_manifest(data_dir: Path) -> None:
+    paths.EXTENSION_DIR.mkdir(parents=True)
+    (paths.EXTENSION_DIR / "manifest.json").write_text("null")  # valid JSON, wrong shape
+    assert paths.cached_extension_version() is None

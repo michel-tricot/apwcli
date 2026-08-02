@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local dev override (points chauffeur at the local checkout); never commit.
+uv.toml

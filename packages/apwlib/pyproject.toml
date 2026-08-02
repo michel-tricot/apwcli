@@ -5,7 +5,7 @@ description = "Programmatic access to Apple Passwords (iCloud Keychain) on macOS
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["websockets>=13", "chauffeur>=0.9"]
+dependencies = ["chauffeur>=0.14.0"]
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9"]

@@ -2,9 +2,12 @@
 
 Layout::
 
-    unix socket (clients) ──▶ ExtensionSession ──▶ WebSocket (in-browser bridge)
+    unix socket (clients) ──▶ ExtensionBridge ──▶ py_chauffeur channel (in-browser bridge)
 
-One bridge connects at a time; requests are serialized and matched by a generated id.
+chauffeur installs a ``py_chauffeur`` channel in the extension's service worker, so the
+daemon drives the in-browser bridge's ``request`` handler directly and the bridge pushes
+pairing state back through a ``@command``. Requests are serialized (the bridge handles one
+native round-trip at a time).
 """
 
 from __future__ import annotations
@@ -14,18 +17,16 @@ import contextlib
 import fcntl
 import json
 import os
-import secrets
 import shutil
 import signal
-import socket as socketlib
 from pathlib import Path
 
-import websockets
 from chauffeur import Browser as ManagedBrowser
-from chauffeur import LaunchSpec
+from chauffeur import ExtensionNotFoundError, LaunchSpec
 
 from apwlib.browsers import Browser
 from apwlib.daemon.extension import extension_spec
+from apwlib.errors import ApwError
 from apwlib.paths import (
     APPLE_NATIVE_MANIFEST,
     LOCK_PATH,
@@ -37,99 +38,66 @@ from apwlib.protocol import WIRE_NO_BRIDGE, Status
 REQUEST_TIMEOUT = 30.0
 
 
-def _free_port() -> int:
-    with socketlib.socket(socketlib.AF_INET, socketlib.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+class ExtensionBridge:
+    """Talks to the in-browser bridge over chauffeur's extension worker channel.
 
+    Replaces the old hand-rolled WebSocket: chauffeur installs ``py_chauffeur`` in the
+    extension's service worker, so ``request()`` invokes the bridge's ``request`` handler
+    and ``pairing()`` pulls live pairing state from its ``status`` handler. Pulling (not
+    caching a push) is race-free: a poll reads the current truth, and a read issued while
+    the worker is mid-handshake queues behind the crypto and returns the settled state.
+    Requests are serialized because the bridge tracks a single native round-trip at a time.
+    """
 
-class ExtensionSession:
-    """Tracks the single bridge WebSocket and correlates requests with responses."""
-
-    def __init__(self, token: str) -> None:
-        self._token = token
-        self._ws: websockets.ServerConnection | None = None
-        self._pending: dict[str, asyncio.Future[dict]] = {}
+    def __init__(self, browser: ManagedBrowser) -> None:
+        self._browser = browser
+        self.extension_id: str | None = None  # set once the extension is loaded
         self._lock = asyncio.Lock()
-        self._paired = False  # last pairing state reported by the bridge
-        self._pairing_state: str | None = None  # raw handshake state (NotInSession/MSG1Set/…)
 
     @property
     def ready(self) -> bool:
-        return self._ws is not None
+        """Whether the extension's service worker has attached its py_chauffeur channel."""
+        return self.extension_id is not None and self._browser.extension_ready(self.extension_id)
 
-    @property
-    def paired(self) -> bool:
-        return self._ws is not None and self._paired
+    async def pairing(self) -> dict:
+        """Live pairing state pulled from the worker: ``{"paired": bool, "state": str|None}``.
 
-    @property
-    def pairing_state(self) -> str | None:
-        return self._pairing_state if self._ws is not None else None
-
-    async def serve(self, ws: websockets.ServerConnection) -> None:
-        """Handle one bridge connection for its lifetime."""
+        Not serialized against :meth:`request`: the worker's ``status`` handler only reads
+        ``g_theState`` (no native round-trip), so a status poll can run alongside an
+        in-flight request. Any failure reads as unpaired.
+        """
+        extension_id = self.extension_id
+        if extension_id is None or not self._browser.extension_ready(extension_id):
+            return {"paired": False, "state": None}
         try:
-            hello = json.loads(await ws.recv())
-        except (websockets.ConnectionClosed, ValueError):
-            return
-        if hello.get("token") != self._token:
-            await ws.close(code=4003, reason="unauthorized")
-            return
-        if self._ws is not None:
-            await ws.close(code=4001, reason="already connected")
-            return
-        self._ws = ws
-        try:
-            async for raw in ws:
-                try:
-                    message = json.loads(raw)
-                except ValueError:
-                    continue
-                if "paired" in message:  # bridge reporting its pairing state
-                    self._paired = bool(message["paired"])
-                    self._pairing_state = message.get("state")
-                    continue
-                future = self._pending.pop(message.get("id"), None)
-                if future and not future.done():
-                    future.set_result(message)
-        except websockets.ConnectionClosed:
-            pass
-        finally:
-            self._ws = None
-            self._paired = False
-            for fut in self._pending.values():
-                if not fut.done():
-                    fut.set_exception(ConnectionError("Extension disconnected"))
-            self._pending.clear()
+            channel = self._browser.extension(extension_id)
+            result = await channel.call("status", timeout=REQUEST_TIMEOUT)
+            return {"paired": bool(result.get("paired")), "state": result.get("state")}
+        except LookupError:
+            return {"paired": False, "state": None}
+        except Exception:  # noqa: BLE001 - a status poll must never propagate
+            return {"paired": False, "state": None}
 
     async def request(self, message: dict) -> dict:
         async with self._lock:
-            if self._ws is None:
-                return {
-                    "id": "",
-                    "status": Status.INVALID_SESSION,
-                    "error": WIRE_NO_BRIDGE,
-                }
-            request_id = secrets.token_hex(8)
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[dict] = loop.create_future()
-            self._pending[request_id] = future
-            await self._ws.send(json.dumps({**message, "id": request_id}))
+            extension_id = self.extension_id
+            if extension_id is None or not self._browser.extension_ready(extension_id):
+                return {"status": Status.INVALID_SESSION, "error": WIRE_NO_BRIDGE}
             try:
-                return await asyncio.wait_for(future, REQUEST_TIMEOUT)
-            except (TimeoutError, ConnectionError) as exc:
-                self._pending.pop(request_id, None)
-                return {
-                    "id": request_id,
-                    "status": Status.SERVER_ERROR,
-                    "error": str(exc) or "timed out",
-                }
+                channel = self._browser.extension(extension_id)
+                return await channel.call("request", message, timeout=REQUEST_TIMEOUT)
+            except LookupError:
+                # The worker was evicted between the readiness check and the call.
+                return {"status": Status.INVALID_SESSION, "error": WIRE_NO_BRIDGE}
+            except Exception as exc:  # noqa: BLE001 - a daemon request must never propagate
+                # JS error, dropped worker, or transport failure -> a response, not a crash.
+                return {"status": Status.SERVER_ERROR, "error": str(exc) or "request failed"}
 
 
 async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    session: ExtensionSession,
+    bridge: ExtensionBridge,
     stop: asyncio.Future[None],
     browser: Browser,
     browser_pid: int,
@@ -141,11 +109,12 @@ async def _handle_client(
         message = json.loads(line)
         op = message.get("op")
         if op == "status":
+            pairing = await bridge.pairing()  # pulled live from the worker
             response: dict = {
                 "running": True,
-                "bridge": session.ready,
-                "paired": session.paired,
-                "pairing_state": session.pairing_state,
+                "bridge": bridge.ready,
+                "paired": pairing["paired"],
+                "pairing_state": pairing["state"],
                 "browser": browser.name,
                 "browser_pid": browser_pid,
             }
@@ -154,7 +123,7 @@ async def _handle_client(
             if not stop.done():
                 stop.set_result(None)
         else:
-            response = await session.request(message)
+            response = await bridge.request(message)
         writer.write((json.dumps(response) + "\n").encode())
         await writer.drain()
     except (ValueError, TimeoutError):
@@ -216,57 +185,72 @@ async def run(browser: Browser) -> None:
         print("apwlib daemon already running; exiting", flush=True)
         return
 
-    token = secrets.token_hex(16)
-    session = ExtensionSession(token)
-
-    ws_port = _free_port()
-    ws_server = await websockets.serve(session.serve, "127.0.0.1", ws_port)
-
     # Everything past the lock is guarded: a failure while launching the browser or
-    # loading the extension must still terminate the browser and release the lock, or
-    # we'd orphan a browser and pile more up on every retry.
-    managed: ManagedBrowser | None = None
+    # loading the extension must still release the lock, or we'd pile a browser up on
+    # every retry. The browser itself is context-managed: chauffeur launches it
+    # (headless, minimal footprint), builds the patched extension beside the profile,
+    # loads it over CDP, installs the worker channel, and terminates it on exit —
+    # including a failed start.
     unix_server: asyncio.Server | None = None
     watcher: asyncio.Task[None] | None = None
     try:
-        # chauffeur launches the browser (headless, minimal footprint), builds the
-        # patched extension beside the profile, and loads it over CDP.
         spec = LaunchSpec(
             profile=_prepare_profile(browser),
             browser=browser.binary,
             headless=True,
-            extensions=(extension_spec(ws_port, token),),
+            extensions=(extension_spec(),),
         )
-        managed = await ManagedBrowser(spec).start()
-        browser_pid = managed.handle.proc.pid if managed.handle else 0
+        managed = ManagedBrowser(spec)
+        bridge = ExtensionBridge(managed)
 
-        stop = asyncio.get_running_loop().create_future()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            with contextlib.suppress(NotImplementedError):
-                asyncio.get_running_loop().add_signal_handler(
-                    sig, lambda: stop.done() or stop.set_result(None)
+        async with managed:
+            if not managed.extension_ids:
+                raise ApwError(
+                    Status.GENERIC_ERROR, "the iCloud Passwords extension failed to load"
                 )
-        watcher = asyncio.create_task(_watch_browser(managed, stop))
+            bridge.extension_id = managed.extension_ids[0]
+            browser_pid = managed.handle.proc.pid if managed.handle else 0
 
-        if SOCKET_PATH.exists():
-            SOCKET_PATH.unlink()
-        unix_server = await asyncio.start_unix_server(
-            lambda r, w: _handle_client(r, w, session, stop, browser, browser_pid),
-            path=str(SOCKET_PATH),
-        )
-        SOCKET_PATH.chmod(0o600)
+            stop = asyncio.get_running_loop().create_future()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                with contextlib.suppress(NotImplementedError):
+                    asyncio.get_running_loop().add_signal_handler(
+                        sig, lambda: stop.done() or stop.set_result(None)
+                    )
+            # Worker liveness is chauffeur's job: the spec's keep_alive (see
+            # extension.py) pokes the worker so the SRP session never goes dormant.
+            watcher = asyncio.create_task(_watch_browser(managed, stop))
 
-        print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
-        await stop
+            if SOCKET_PATH.exists():
+                SOCKET_PATH.unlink()
+            unix_server = await asyncio.start_unix_server(
+                lambda r, w: _handle_client(r, w, bridge, stop, browser, browser_pid),
+                path=str(SOCKET_PATH),
+            )
+            SOCKET_PATH.chmod(0o600)
+
+            print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
+            try:
+                await stop
+            finally:
+                # Stop accepting clients BEFORE the browser teardown that runs on
+                # leaving the async-with (it can take seconds). Shutdown order the
+                # client relies on: socket first, browser next, lock last.
+                unix_server.close()
+                with contextlib.suppress(FileNotFoundError):
+                    SOCKET_PATH.unlink()
+    except ExtensionNotFoundError as exc:
+        # Only the store download can raise this here: a first-ever fetch failed
+        # with no cache to fall back on. Say so in apwlib's error vocabulary.
+        raise ApwError(
+            Status.GENERIC_ERROR,
+            f"could not download the iCloud Passwords extension from the Chrome Web Store: {exc}",
+        ) from exc
     finally:
         if watcher is not None:
             watcher.cancel()
         if unix_server is not None:
             unix_server.close()
-        ws_server.close()
-        if managed is not None:
-            with contextlib.suppress(Exception):
-                await managed.aclose()
         with contextlib.suppress(FileNotFoundError):
             SOCKET_PATH.unlink()
         os.close(lock_fd)

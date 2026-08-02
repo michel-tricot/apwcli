@@ -21,10 +21,8 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Literal
 
-from chauffeur import LaunchSpec, SyncBrowser, Window
-from chauffeur.launch import LaunchError, screen_size
+from chauffeur import LaunchError, LaunchSpec, SyncBrowser, Window
 
 from apwlib.browsers import Browser, installed_browsers, resolve_browser
 from apwlib.config import read_config
@@ -77,23 +75,14 @@ def _running_browser() -> Browser | None:
     )
 
 
-def _position() -> tuple[int, int] | Literal["center"]:
-    """A bit above center, like a system dialog; plain centering if we can't measure."""
-    screen = screen_size()
-    if screen is None:
-        return "center"
-    width, height = _WINDOW_SIZE
-    return (max((screen[0] - width) // 2, 0), max((screen[1] - height) // 3, 0))
-
-
 def _window_spec(browser: Browser, workdir: Path) -> LaunchSpec:
     """A chromeless, dialog-sized app window serving the PIN page from ``workdir``."""
     return LaunchSpec(
         profile=workdir / "profile",
         browser=browser.binary,
         headless=False,
-        app_page=workdir / "page.html",
-        window=Window(size=_WINDOW_SIZE, position=_position()),
+        url=workdir / "page.html",  # app defaults True: a chromeless (--app) window
+        window=Window(size=_WINDOW_SIZE, position="top"),  # top of screen, by the macOS PIN dialog
     )
 
 
@@ -117,19 +106,29 @@ def request_pin(timeout: float = _TIMEOUT, css: str | None = None) -> str:
 
         window = SyncBrowser(_window_spec(browser, workdir))
         answered = threading.Event()
-        answer: list[str] = []
+        # Each source records (kind, pin) in ONE atomic write and the first writer
+        # wins (a close beacon may race a submit, the timer may race both; sources
+        # run on different threads, so the record must not be split across two
+        # operations). No outcome recorded means serve() returned on its own —
+        # the window was closed.
+        outcome: dict[str, tuple[str, str]] = {}
+
+        def _finish(kind: str, pin: str = "") -> None:
+            outcome.setdefault("result", (kind, pin))
+            answered.set()
 
         @window.command("pin")
         def _receive(params: dict) -> None:
-            if not answer:  # first answer wins (a close beacon may race a submit)
-                answer.append(str(params.get("pin", "")))
-            answered.set()
+            _finish("pin", str(params.get("pin", "")))
 
-        timer = threading.Timer(timeout, answered.set)
+        timer = threading.Timer(timeout, lambda: _finish("timeout"))
         try:
             with window:
                 timer.start()
                 window.serve(until=answered)
+                # Cancel before the (potentially slow) window teardown in __exit__,
+                # so a just-closed window isn't misreported as a timeout.
+                timer.cancel()
         except LaunchError as exc:
             raise NotPairedError(
                 Status.INVALID_SESSION, f"PIN window failed to open: {exc}"
@@ -137,11 +136,14 @@ def request_pin(timeout: float = _TIMEOUT, css: str | None = None) -> str:
         finally:
             timer.cancel()
 
-    if answer:
-        if answer[0]:
-            return answer[0]
-        raise NotPairedError(Status.INVALID_SESSION, "pairing cancelled")
-    if answered.is_set():  # only the timer sets the event without an answer
-        raise NotPairedError(Status.INVALID_SESSION, "timed out waiting for the PIN")
-    # serve() returned on its own: the window (or browser) went away unanswered.
-    raise NotPairedError(Status.INVALID_SESSION, "PIN window closed before a code was entered")
+    match outcome.get("result"):
+        case ("pin", pin) if pin:
+            return pin
+        case ("pin", _):
+            raise NotPairedError(Status.INVALID_SESSION, "pairing cancelled")
+        case ("timeout", _):
+            raise NotPairedError(Status.INVALID_SESSION, "timed out waiting for the PIN")
+        case _:  # serve() returned on its own: the window went away unanswered
+            raise NotPairedError(
+                Status.INVALID_SESSION, "PIN window closed before a code was entered"
+            )

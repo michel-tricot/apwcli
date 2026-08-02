@@ -77,10 +77,24 @@ def test_request_pin_returns_submitted_pin(
     # The window is a chromeless app page served from the scratch dir, sized like a dialog.
     assert window.spec.browser == fake_browser.binary
     assert window.spec.headless is False
-    assert window.spec.app_page.name == "page.html" and window.spec.app_page.parent.name.startswith(
-        "apwlib-pin-"
-    )
+    assert window.spec.url.name == "page.html"
+    assert window.spec.url.parent.name.startswith("apwlib-pin-")
+    assert window.spec.app is True
     assert window.spec.window.size == pinwindow._WINDOW_SIZE
+    assert window.spec.window.position == "top"  # chauffeur pins it to the top of the screen
+
+
+def test_request_pin_first_answer_wins(
+    fake_browser: Browser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class SubmitThenCloseBeacon(_FakeWindow):
+        def serve(self, *, until: threading.Event | None = None) -> None:
+            self._answer("123456")
+            self._answer("")  # the pagehide close beacon racing the submit must not win
+            assert until is not None and until.wait(5)
+
+    _install(monkeypatch, SubmitThenCloseBeacon)
+    assert request_pin(timeout=5) == "123456"
 
 
 def test_request_pin_empty_pin_means_cancelled(
@@ -99,7 +113,10 @@ def test_request_pin_empty_pin_means_cancelled(
 def test_request_pin_window_closed(fake_browser: Browser, monkeypatch: pytest.MonkeyPatch) -> None:
     class ClosesUnanswered(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
-            return  # serve() returned on its own: the user closed the window
+            # The user closed the window: serve() returns on its own. Mimic chauffeur's
+            # real contract, which sets `until` on the way out regardless of the cause.
+            if until is not None:
+                until.set()
 
     _install(monkeypatch, ClosesUnanswered)
     with pytest.raises(NotPairedError, match="closed"):
@@ -152,17 +169,6 @@ def test_style_prefers_user_override(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 def test_style_defaults_to_bundled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(pinwindow, "PIN_STYLE_PATH", tmp_path / "absent.css")
     assert ".boxes" in pinwindow._style(None)  # the bundled default styles the code boxes
-
-
-def test_position_above_center(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pinwindow, "screen_size", lambda: (2000, 1200))
-    width, height = pinwindow._WINDOW_SIZE
-    assert pinwindow._position() == ((2000 - width) // 2, (1200 - height) // 3)
-
-
-def test_position_centers_without_screen_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pinwindow, "screen_size", lambda: None)
-    assert pinwindow._position() == "center"
 
 
 def _ps_result(lines: list[str]) -> object:

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import typer
 from apwlib.browsers import BROWSERS, installed_browsers
-from apwlib.daemon.extension import cached_extension_version
-from apwlib.paths import APPLE_NATIVE_MANIFEST
+from apwlib.paths import APPLE_NATIVE_MANIFEST, cached_extension_version
 
 from apwcli.cli.common import app, client, status_line
 

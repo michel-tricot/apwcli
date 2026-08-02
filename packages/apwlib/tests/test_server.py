@@ -74,8 +74,107 @@ class _FakeWriter:
 
 class _FakeSession:
     ready = True
-    paired = False
-    pairing_state = "MSG1Set"
+
+    async def pairing(self) -> dict:
+        return {"paired": False, "state": "MSG1Set"}
+
+
+class _FakeChannel:
+    def __init__(self, result: Any = None, error: Exception | None = None) -> None:
+        self._result = result
+        self._error = error
+        self.calls: list[tuple[str, dict | None]] = []
+
+    async def call(self, command: str, params: dict | None = None, *, timeout: float = 30.0) -> Any:  # noqa: ASYNC109 - mirrors chauffeur's ExtensionChannel.call
+        self.calls.append((command, params))
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+class _FakeManagedBrowser:
+    """Stands in for a chauffeur Browser's extension worker-channel surface."""
+
+    def __init__(
+        self, *, ready: bool, channel: _FakeChannel | None = None, lookup_error: bool = False
+    ) -> None:
+        self._ready = ready
+        self._channel = channel
+        self._lookup_error = lookup_error
+
+    def extension_ready(self, extension_id: str) -> bool:
+        return self._ready
+
+    def extension(self, extension_id: str) -> _FakeChannel:
+        if self._lookup_error or self._channel is None:
+            raise LookupError(extension_id)
+        return self._channel
+
+
+@pytest.mark.anyio
+async def test_request_returns_no_bridge_when_worker_absent() -> None:
+    bridge = server.ExtensionBridge(cast(Any, _FakeManagedBrowser(ready=False)))
+    bridge.extension_id = "abc"
+    resp = await bridge.request({"cmd": 4, "qid": "q", "body": {}})
+    assert resp["error"] == server.WIRE_NO_BRIDGE
+
+
+@pytest.mark.anyio
+async def test_request_forwards_to_worker_channel() -> None:
+    channel = _FakeChannel(result={"data": {"STATUS": 0}})
+    managed = _FakeManagedBrowser(ready=True, channel=channel)
+    bridge = server.ExtensionBridge(cast(Any, managed))
+    bridge.extension_id = "abc"
+
+    resp = await bridge.request({"cmd": 4, "qid": "q", "body": {}})
+
+    assert resp == {"data": {"STATUS": 0}}
+    assert channel.calls == [("request", {"cmd": 4, "qid": "q", "body": {}})]
+
+
+@pytest.mark.anyio
+async def test_request_maps_evicted_worker_to_no_bridge() -> None:
+    managed = _FakeManagedBrowser(ready=True, lookup_error=True)
+    bridge = server.ExtensionBridge(cast(Any, managed))
+    bridge.extension_id = "abc"
+    resp = await bridge.request({"cmd": 4, "qid": "q", "body": {}})
+    assert resp["error"] == server.WIRE_NO_BRIDGE
+
+
+@pytest.mark.anyio
+async def test_request_maps_call_failure_to_server_error() -> None:
+    channel = _FakeChannel(error=RuntimeError("worker died"))
+    managed = _FakeManagedBrowser(ready=True, channel=channel)
+    bridge = server.ExtensionBridge(cast(Any, managed))
+    bridge.extension_id = "abc"
+    resp = await bridge.request({"cmd": 4, "qid": "q", "body": {}})
+    assert resp["status"] == server.Status.SERVER_ERROR
+    assert "worker died" in resp["error"]
+
+
+@pytest.mark.anyio
+async def test_pairing_pulls_live_state_from_worker() -> None:
+    channel = _FakeChannel(result={"paired": True, "state": "SessionKeySet"})
+    bridge = server.ExtensionBridge(cast(Any, _FakeManagedBrowser(ready=True, channel=channel)))
+    bridge.extension_id = "abc"
+
+    assert await bridge.pairing() == {"paired": True, "state": "SessionKeySet"}
+    assert channel.calls == [("status", None)]  # pulled, not cached
+
+
+@pytest.mark.anyio
+async def test_pairing_unpaired_when_worker_absent() -> None:
+    bridge = server.ExtensionBridge(cast(Any, _FakeManagedBrowser(ready=False)))
+    bridge.extension_id = "abc"
+    assert await bridge.pairing() == {"paired": False, "state": None}
+
+
+@pytest.mark.anyio
+async def test_pairing_unpaired_on_call_failure() -> None:
+    channel = _FakeChannel(error=RuntimeError("worker died"))
+    bridge = server.ExtensionBridge(cast(Any, _FakeManagedBrowser(ready=True, channel=channel)))
+    bridge.extension_id = "abc"
+    assert await bridge.pairing() == {"paired": False, "state": None}
 
 
 @pytest.mark.anyio

@@ -70,7 +70,6 @@ select = [
 ignore = [
     "S603",    # spawning browsers/daemons is what this tool does
     "S607",    # macOS system tools (ps, pbcopy, tail, ...) are invoked by well-known name
-    "S310",    # urlopen is only used against localhost DevTools / the Chrome store
     "PLR0913", # handler plumbing and typer commands legitimately thread several arguments
     "PLR0917", # same, for positional counting
     "PLC0415", # lazy imports are deliberate: fast CLI startup, no client->daemon import
@@ -80,8 +79,7 @@ ignore = [
 # The daemon logs to stdout/stderr by design (redirected to ~/.apwlib/daemon.log).
 "packages/apwlib/src/apwlib/daemon/**" = ["T201"]
 # Tests: asserts, magic values, fake tokens/paths, args that exist to match signatures.
-"tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
-"packages/apwlib/tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
+"**/tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
 
 [tool.pytest.ini_options]
 testpaths = [

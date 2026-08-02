@@ -139,7 +139,7 @@ library.
   │  (Typer)    │   JSON lines    │ (apwlib.     │  load ext  │  ┌──────────────┐  │
   │             │                 │   daemon)    │            │  │ iCloud Pwds  │  │
   │ ApplePass-  │ ◀────────────── │              │ ◀────────▶ │  │ extension +  │  │
-  │ words facade│                 │  WebSocket   │  bridge.js │  │ bridge.js    │  │
+  │ words facade│                 │  wkr-chan.   │  bridge.js │  │ bridge.js    │  │
   └─────────────┘                 │  + socket    │  messages  │  │ (SRP + SMSG) │  │
                                   └──────────────┘            │  └──────┬───────┘  │
                                                               └─────────┼──────────┘
@@ -147,6 +147,12 @@ library.
                                                                         ▼
                                               PasswordManagerBrowserExtensionHelper
 ```
+
+The daemon reaches the in-browser bridge over chauffeur's `py_chauffeur`
+worker channel: chauffeur installs the channel in the extension's service
+worker, so the daemon calls the bridge's `request` handler directly and pulls
+pairing state from its `status` handler. There is no WebSocket server, port, or
+auth token — the channel is owned by chauffeur over CDP.
 
 The facade never imports the `daemon/` subpackage — it spawns
 `python -m apwlib.daemon` and talks over the socket, so `import apwlib` stays
@@ -170,10 +176,10 @@ pinwindow/
   default.css   default stylesheet (overridden by ~/.apwlib/pinwindow.css or css=)
 daemon/
   __main__.py   `python -m apwlib.daemon` entry point
-  server.py     owns the browser (via chauffeur); WebSocket bridge + unix-socket
-                  servers; singleton lock
-  extension.py  store-download cache + the chauffeur ExtensionSpec that injects
-                  bridge.js and its config
+  server.py     owns the browser (via chauffeur); drives the bridge over the
+                  worker channel; unix-socket server; singleton lock
+  extension.py  the chauffeur ExtensionSpec (store download, refreshed per build,
+                  cache pinned for doctor) that appends bridge.js
   bridge.js     JavaScript bridge appended to the extension's background worker
   bridge.py     loads bridge.js
 ```
@@ -183,9 +189,9 @@ daemon/
 ```
   facade.get_password(url)
     → connect ~/.apwlib/apw.sock, write one JSON line {cmd, qid, tabId, frameId, url, body}
-    → daemon tags it with an id, forwards over WebSocket to the bridge
+    → daemon calls the bridge's `request` handler over chauffeur's worker channel
     → bridge encrypts body with the extension's SecretSession, posts to the helper
-    → helper's encrypted reply decrypted by the bridge → {id, data} back to the daemon
+    → helper's encrypted reply decrypted by the bridge → {data} resolves the call
     → daemon returns the line; facade parses data into PasswordEntry/OTPEntry
 ```
 
@@ -247,15 +253,26 @@ an event handler:
 
 - Global `error` / `unhandledrejection` handlers `preventDefault()` stray
   failures so the worker isn't torn down.
-- Every extension/native/WebSocket call is wrapped; every extension global is
+- Every extension/native call is wrapped; every extension global is
   `typeof`-guarded (an undeclared global would `ReferenceError` and kill it).
 - Requests are validated (cmd/qid/body shape) **before** the crypto/native layer.
 - A single in-flight request has a native-reply timeout, so a request the helper
   never answers is released instead of wedging the bridge.
-- It reports pairing state (`{paired}`) and reconnects once on WebSocket close.
-- A periodic keepalive (a no-op `getPlatformInfo` every 20s, permission-free) resets
-  the MV3 idle timer so the worker isn't evicted — which would silently drop the
-  pairing — and redials the socket if it has closed.
+- It reaches the daemon over chauffeur's `py_chauffeur` channel: a `request`
+  handler answers commands and a `status` handler returns live pairing state
+  (`{paired, state}`) when the daemon pulls it. Pulling is race-free — a read
+  issued mid-handshake queues behind the crypto and returns the settled state —
+  and there is no socket to dial, reconnect, or authenticate.
+
+The worker must stay awake, or a dormant MV3 worker drops the pairing: an
+in-flight SRP handshake collapses (`ChallengeSent` → `NotInSession`) within
+seconds, and eventually the paired session goes too. The old WebSocket bridge
+kept the worker alive implicitly with its open connection; the worker channel
+has none, and an in-worker `setInterval` is unreliable (MV3 suspends timers on a
+dormant worker). So **chauffeur** keeps it awake — its worker channels carry a
+keep-alive that pokes the worker from outside the browser, and the spec dials it
+down to two seconds (`keep_alive` in `extension.py`) because chauffeur's
+eviction-safe default is far slower than the handshake's collapse.
 
 ## Models
 
@@ -293,22 +310,24 @@ class OTPEntry:
 | CLI secrets | Mask in tables, clipboard opt-in | Passwords otherwise land in terminal scrollback. `text`/`json` (pipe targets) stay unmasked; `-c` routes the value via `pbcopy`, never stdout. |
 | No-TTY pairing | App-mode PIN window | The PIN must be typed by a human at the screen. A chromeless `--app` window of the managed browser looks like a native dialog and adds no dependency; PyObjC (heavy) and osascript (crude) lost. |
 | MCP scope | No plaintext passwords by default | MCP tool results are sent to the model provider. `list_accounts`/`get_otp`/`save_password` are safe; `get_password` is gated behind `--allow-passwords`. |
-| Dependencies | `websockets` + `chauffeur` (lib), `typer`/`rich`/`fastmcp` (CLI) | The daemon needs a WebSocket server (bridge) and a browser control plane (chauffeur); no crypto dependency. |
+| Dependencies | `chauffeur` (lib), `typer`/`rich`/`fastmcp` (CLI) | chauffeur is the browser control plane *and* the bridge transport (its worker channel carries the daemon↔extension messages), so there's no separate socket server and no crypto dependency. |
 | Platform | macOS 14+, Python ≥ 3.12 | The helper, extension, and PIN flow are macOS-only; a non-macOS spawn fails with a clear error. chauffeur sets the Python floor. |
 
 ## Notes & limits
 
 - **Service-worker eviction:** the paired session lives in the MV3 worker. A
   keepalive (see [The bridge](#the-bridge)) resets the idle timer to prevent
-  eviction; if the worker is still lost, the bridge reconnects and an evicted
-  pairing surfaces as `NotPairedError` so the client can re-pair.
+  eviction; if the worker is still evicted, chauffeur re-installs the channel in
+  the respawned worker but the in-memory pairing is gone, so the next request
+  surfaces as `NotPairedError` and the client re-pairs.
 - **Browser lifetime:** the daemon watches its managed browser and self-exits if
   it dies (freeing the singleton lock and cleaning up), rather than lingering with
   a dead bridge. A failure while launching the browser or loading the extension
   likewise terminates the child before exiting, so no orphaned browsers accumulate.
 - **Version drift:** the daemon reads the native-messaging manifest for the helper
   path, and re-downloads the extension from the Chrome Web Store on every start
-  (cached under `~/.apwlib/extension`), so a new iCloud Passwords release is
+  (chauffeur's `from_store(refresh=True)`, cache pinned under
+  `~/.apwlib/<extension-id>.src`), so a new iCloud Passwords release is
   picked up rather than frozen at first download. When the store is unreachable
   (offline), the cached copy keeps working.
 - **Headless loading:** chauffeur loads the extension via CDP
