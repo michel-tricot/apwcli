@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -23,9 +26,7 @@ def _fake_download(body: str, version: str = "3.3.0"):
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
-        (dest / "manifest.json").write_text(
-            f'{{"name": "iCloud Passwords", "version": "{version}"}}'
-        )
+        (dest / "manifest.json").write_text(f'{{"name": "iCloud Passwords", "version": "{version}"}}')
         (dest / "background.js").write_text(body)
         return dest
 
@@ -45,22 +46,38 @@ def data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_spec_appends_bridge_after_source(
-    data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_spec_appends_bridge_after_source(data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// pristine\n"))
 
     built = build_extension(extension.extension_spec(), tmp_path / "build")
 
     background = (built / "background.js").read_text()
-    # The bridge reaches the daemon over chauffeur's worker channel, so nothing is
-    # injected — the store source is followed by the appended bridge.
-    assert background.index("// pristine") < background.index("// bridge")
+    # Layout: injected wire constants, then the store source, then the appended
+    # bridge — the config global must exist before either of the others runs.
+    assert background.index("__chauffeur_config") < background.index("// pristine") < background.index("// bridge")
 
 
-def test_spec_pins_cache_where_doctor_looks(
-    data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_bridge_reads_only_injected_config_keys(data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # bridge.js reads globalThis.__chauffeur_config.<key> for every wire constant;
+    # a key it references but extension_spec doesn't inject would boot the bridge
+    # with undefined constants. Guard the one remaining cross-language coupling.
+    from apwlib.protocol import WIRE_UNPAIRED
+
+    monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// pristine\n"))
+    built = build_extension(extension.extension_spec(), tmp_path / "build")
+
+    background = (built / "background.js").read_text()
+    match = re.search(r"globalThis\.__chauffeur_config = (\{.*?\});", background)
+    assert match, "inject_config global not found in the built background"
+    injected = json.loads(match.group(1))
+
+    bridge = files("apwlib.daemon").joinpath("bridge.js").read_text()  # the real bridge, not the fixture stub
+    referenced = set(re.findall(r"CONFIG\.(\w+)", bridge))
+    assert referenced and referenced <= set(injected)
+    assert injected["wireUnpaired"] == WIRE_UNPAIRED
+
+
+def test_spec_pins_cache_where_doctor_looks(data_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// x\n"))
 
     build_extension(extension.extension_spec(), tmp_path / "build")

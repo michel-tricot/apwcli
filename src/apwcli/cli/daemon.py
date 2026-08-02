@@ -8,7 +8,7 @@ import subprocess
 
 import typer
 from apwlib import ApwError, Status
-from apwlib.browsers import BROWSERS, installed_browsers
+from apwlib.browsers import BREW_CASKS, BROWSERS, installed_browsers
 from apwlib.config import read_config, write_config
 from apwlib.paths import LOG_PATH
 
@@ -18,26 +18,20 @@ from apwcli.cli.common import _prompt_pin, client, daemon_app, fail, render_stat
 def _ensure_browser_installed() -> None:
     """Fail with an install hint unless a supported browser is present."""
     if not installed_browsers():
-        hints = "\n".join(f"  brew install --cask {b.brew_cask}  # {b.name}" for b in BROWSERS)
+        hints = "\n".join(f"  brew install --cask {BREW_CASKS[b.id]}  # {b.name}" for b in BROWSERS)
         fail(ApwError(Status.GENERIC_ERROR, f"No supported browser found. Install one:\n{hints}"))
 
 
 def _require_ready(ready: bool) -> None:
     """Fail if the daemon didn't come up, pointing at the log."""
     if not ready:
-        fail(
-            ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log")
-        )
+        fail(ApwError(Status.GENERIC_ERROR, "daemon did not become ready; see ~/.apwlib/daemon.log"))
 
 
 @daemon_app.command("start")
 def daemon_start(
-    browser: str = typer.Option(
-        None, "--browser", "-b", help="Browser to manage (auto, chromium, chrome, brave)."
-    ),
-    foreground: bool = typer.Option(
-        False, "--foreground", "-f", help="Run in the foreground instead of detaching."
-    ),
+    browser: str = typer.Option(None, "--browser", "-b", help="Browser to manage (auto, chromium, chrome, brave)."),
+    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
     _ensure_browser_installed()
@@ -117,9 +111,15 @@ def daemon_pair(
     pin: str = typer.Option(None, "--pin", help="6-digit PIN (otherwise prompted)."),
 ) -> None:
     """Pair with Apple Passwords using the macOS PIN."""
+    # Narrate each phase: auto-start, the PIN window, and verification can each
+    # take seconds to minutes with nothing on screen, which reads as a hang.
     try:
+        if not client.daemon.status()["running"]:
+            status_line("starting the daemon (takes a few seconds)")
         client.daemon.request_challenge()
+        status_line("pairing code requested — macOS is displaying it")
         code = pin or _prompt_pin()
+        status_line("verifying")
         client.daemon.verify_challenge(code)
         paired = client.daemon.wait_until_paired()
     except ApwError as exc:

@@ -1,13 +1,15 @@
-"""The daemon: owns a managed browser and bridges CLI clients to the extension.
+"""The daemon: a chauffeur-managed headless browser hosting the iCloud Passwords
+extension, exposed to CLI clients over a unix socket.
 
 Layout::
 
     unix socket (clients) ──▶ ExtensionBridge ──▶ py_chauffeur channel (in-browser bridge)
 
-chauffeur installs a ``py_chauffeur`` channel in the extension's service worker, so the
-daemon drives the in-browser bridge's ``request`` handler directly and the bridge pushes
-pairing state back through a ``@command``. Requests are serialized (the bridge handles one
-native round-trip at a time).
+chauffeur does the heavy lifting: it launches the browser, builds and loads the
+patched extension, installs the ``py_chauffeur`` channel in its service worker,
+and keeps the worker awake. The daemon just forwards each client request to the
+in-browser bridge's ``request`` handler and answers ``status`` polls from its
+``status`` handler.
 """
 
 from __future__ import annotations
@@ -21,96 +23,85 @@ import shutil
 import signal
 from pathlib import Path
 
-from chauffeur import Browser as ManagedBrowser
-from chauffeur import ExtensionNotFoundError, LaunchSpec
+from chauffeur import Browser, ExtensionNotFoundError, JSError, LaunchSpec, wipe_profile
 
-from apwlib.browsers import Browser
+from apwlib.browsers import BrowserInfo, profile_for
 from apwlib.daemon.extension import extension_spec
 from apwlib.errors import ApwError
-from apwlib.paths import (
-    APPLE_NATIVE_MANIFEST,
-    LOCK_PATH,
-    SOCKET_PATH,
-    ensure_data_dir,
-)
+from apwlib.paths import APPLE_NATIVE_MANIFEST, LOCK_PATH, SOCKET_PATH, ensure_data_dir
 from apwlib.protocol import WIRE_NO_BRIDGE, Status
 
 REQUEST_TIMEOUT = 30.0
 
 
 class ExtensionBridge:
-    """Talks to the in-browser bridge over chauffeur's extension worker channel.
+    """The ``py_chauffeur`` channel into the extension's service worker.
 
-    Replaces the old hand-rolled WebSocket: chauffeur installs ``py_chauffeur`` in the
-    extension's service worker, so ``request()`` invokes the bridge's ``request`` handler
-    and ``pairing()`` pulls live pairing state from its ``status`` handler. Pulling (not
-    caching a push) is race-free: a poll reads the current truth, and a read issued while
-    the worker is mid-handshake queues behind the crypto and returns the settled state.
-    Requests are serialized because the bridge tracks a single native round-trip at a time.
+    ``request()`` invokes the in-browser bridge's ``request`` handler and
+    ``pairing()`` pulls live pairing state from its ``status`` handler. Requests
+    are serialized because the bridge tracks a single native round-trip at a time.
     """
 
-    def __init__(self, browser: ManagedBrowser) -> None:
+    def __init__(self, browser: Browser, extension_id: str) -> None:
         self._browser = browser
-        self.extension_id: str | None = None  # set once the extension is loaded
+        self._extension_id = extension_id
         self._lock = asyncio.Lock()
 
     @property
     def ready(self) -> bool:
         """Whether the extension's service worker has attached its py_chauffeur channel."""
-        return self.extension_id is not None and self._browser.extension_ready(self.extension_id)
+        return self._browser.extension_ready(self._extension_id)
 
     async def pairing(self) -> dict:
         """Live pairing state pulled from the worker: ``{"paired": bool, "state": str|None}``.
 
-        Not serialized against :meth:`request`: the worker's ``status`` handler only reads
-        ``g_theState`` (no native round-trip), so a status poll can run alongside an
-        in-flight request. Any failure reads as unpaired.
+        Reads as unpaired while the worker is still booting.
         """
-        extension_id = self.extension_id
-        if extension_id is None or not self._browser.extension_ready(extension_id):
+        if not self.ready:
             return {"paired": False, "state": None}
         try:
-            channel = self._browser.extension(extension_id)
-            result = await channel.call("status", timeout=REQUEST_TIMEOUT)
-            return {"paired": bool(result.get("paired")), "state": result.get("state")}
-        except LookupError:
+            result = await self._browser.extension(self._extension_id).call("status", timeout=REQUEST_TIMEOUT)
+        except (JSError, LookupError):
+            # ready flips true when chauffeur installs the channel, a beat before the
+            # appended bridge registers its handlers (JSError: no such handler) — and a
+            # respawning worker can detach between the check and the call (LookupError).
             return {"paired": False, "state": None}
-        except Exception:  # noqa: BLE001 - a status poll must never propagate
-            return {"paired": False, "state": None}
+        return {"paired": bool(result.get("paired")), "state": result.get("state")}
 
     async def request(self, message: dict) -> dict:
         async with self._lock:
-            extension_id = self.extension_id
-            if extension_id is None or not self._browser.extension_ready(extension_id):
+            if not self.ready:
                 return {"status": Status.INVALID_SESSION, "error": WIRE_NO_BRIDGE}
             try:
-                channel = self._browser.extension(extension_id)
-                return await channel.call("request", message, timeout=REQUEST_TIMEOUT)
-            except LookupError:
-                # The worker was evicted between the readiness check and the call.
+                return await self._browser.extension(self._extension_id).call("request", message, timeout=REQUEST_TIMEOUT)
+            except JSError as exc:  # handler not yet registered (worker still booting)
+                return {"status": Status.INVALID_SESSION, "error": str(exc)}
+            except LookupError:  # worker detached between the ready check and the call
                 return {"status": Status.INVALID_SESSION, "error": WIRE_NO_BRIDGE}
-            except Exception as exc:  # noqa: BLE001 - a daemon request must never propagate
-                # JS error, dropped worker, or transport failure -> a response, not a crash.
-                return {"status": Status.SERVER_ERROR, "error": str(exc) or "request failed"}
 
 
 async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     bridge: ExtensionBridge,
-    stop: asyncio.Future[None],
-    browser: Browser,
+    stop: asyncio.Event,
+    browser: BrowserInfo,
     browser_pid: int,
 ) -> None:
     try:
-        line = await asyncio.wait_for(reader.readline(), REQUEST_TIMEOUT)
-        if not line:
-            return
-        message = json.loads(line)
-        op = message.get("op")
-        if op == "status":
+        message: object = None
+        with contextlib.suppress(TimeoutError, json.JSONDecodeError):
+            line = await asyncio.wait_for(reader.readline(), REQUEST_TIMEOUT)
+            if not line:
+                return
+            message = json.loads(line)
+        if not isinstance(message, dict):
+            # Bad JSON (or a read timeout) still deserves a reply: hanging up here
+            # would surface on the client as a decode error, not an ApwError.
+            response: dict = {"status": Status.INVALID_PARAM, "error": "malformed request"}
+        elif message.get("op") == "status":
             pairing = await bridge.pairing()  # pulled live from the worker
-            response: dict = {
+            response = {
                 "running": True,
                 "bridge": bridge.ready,
                 "paired": pairing["paired"],
@@ -118,32 +109,29 @@ async def _handle_client(
                 "browser": browser.name,
                 "browser_pid": browser_pid,
             }
-        elif op == "stop":
+        elif message.get("op") == "stop":
             response = {"stopping": True}
-            if not stop.done():
-                stop.set_result(None)
+            stop.set()
         else:
             response = await bridge.request(message)
         writer.write((json.dumps(response) + "\n").encode())
         await writer.drain()
-    except (ValueError, TimeoutError):
-        writer.write(
-            (
-                json.dumps({"id": "", "status": Status.SERVER_ERROR, "error": "bad request"}) + "\n"
-            ).encode()
-        )
-        with contextlib.suppress(Exception):
-            await writer.drain()
     finally:
         writer.close()
         with contextlib.suppress(Exception):
             await writer.wait_closed()
 
 
-def _prepare_profile(browser: Browser) -> Path:
-    profile = browser.profile
-    if profile.exists():
-        shutil.rmtree(profile)
+def _prepare_profile(browser: BrowserInfo) -> Path:
+    """Reset the managed profile to a clean slate holding only Apple's manifest.
+
+    ``wipe_profile`` first asks a browser still running on the profile (leaked by a
+    killed daemon) to exit, so it can't rewrite state on the way out, and removes
+    chauffeur's sidecars too. It runs an event loop of its own for that, so this
+    must be called off the daemon's loop (see the ``to_thread`` in :func:`run`).
+    """
+    profile = profile_for(browser)
+    wipe_profile(profile)
     hosts = profile / "NativeMessagingHosts"
     hosts.mkdir(parents=True)
     shutil.copyfile(APPLE_NATIVE_MANIFEST, hosts / "com.apple.passwordmanager.json")
@@ -165,19 +153,7 @@ def _acquire_singleton_lock() -> int | None:
     return fd
 
 
-async def _watch_browser(managed: ManagedBrowser, stop: asyncio.Future[None]) -> None:
-    """Trigger shutdown if the managed browser exits, so the lock frees and cleanup runs.
-
-    ``serve()`` returns when the DevTools connection drops (the browser died) or its
-    primary target closes — either way the daemon is useless without its browser.
-    """
-    with contextlib.suppress(Exception):
-        await managed.serve()
-    if not stop.done():
-        stop.set_result(None)
-
-
-async def run(browser: Browser) -> None:
+async def run(browser: BrowserInfo) -> None:
     """Run the daemon until interrupted. No-op if another daemon already holds the lock."""
     ensure_data_dir()
     lock_fd = _acquire_singleton_lock()
@@ -185,72 +161,47 @@ async def run(browser: Browser) -> None:
         print("apwlib daemon already running; exiting", flush=True)
         return
 
-    # Everything past the lock is guarded: a failure while launching the browser or
-    # loading the extension must still release the lock, or we'd pile a browser up on
-    # every retry. The browser itself is context-managed: chauffeur launches it
-    # (headless, minimal footprint), builds the patched extension beside the profile,
-    # loads it over CDP, installs the worker channel, and terminates it on exit —
-    # including a failed start.
-    unix_server: asyncio.Server | None = None
-    watcher: asyncio.Task[None] | None = None
     try:
+        # to_thread: _prepare_profile runs its own event loop (closing a leaked
+        # browser), which is illegal on the daemon's loop thread.
         spec = LaunchSpec(
-            profile=_prepare_profile(browser),
+            profile=await asyncio.to_thread(_prepare_profile, browser),
             browser=browser.binary,
             headless=True,
             extensions=(extension_spec(),),
         )
-        managed = ManagedBrowser(spec)
-        bridge = ExtensionBridge(managed)
+        try:
+            async with Browser(spec) as managed:
+                bridge = ExtensionBridge(managed, managed.extension_ids[0])
+                browser_pid = managed.handle.proc.pid if managed.handle else 0
 
-        async with managed:
-            if not managed.extension_ids:
-                raise ApwError(
-                    Status.GENERIC_ERROR, "the iCloud Passwords extension failed to load"
+                stop = asyncio.Event()
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    with contextlib.suppress(NotImplementedError):
+                        asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+
+                SOCKET_PATH.unlink(missing_ok=True)
+                unix_server = await asyncio.start_unix_server(
+                    lambda r, w: _handle_client(r, w, bridge, stop, browser, browser_pid),
+                    path=str(SOCKET_PATH),
                 )
-            bridge.extension_id = managed.extension_ids[0]
-            browser_pid = managed.handle.proc.pid if managed.handle else 0
+                SOCKET_PATH.chmod(0o600)
+                print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
 
-            stop = asyncio.get_running_loop().create_future()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                with contextlib.suppress(NotImplementedError):
-                    asyncio.get_running_loop().add_signal_handler(
-                        sig, lambda: stop.done() or stop.set_result(None)
-                    )
-            # Worker liveness is chauffeur's job: the spec's keep_alive (see
-            # extension.py) pokes the worker so the SRP session never goes dormant.
-            watcher = asyncio.create_task(_watch_browser(managed, stop))
-
-            if SOCKET_PATH.exists():
-                SOCKET_PATH.unlink()
-            unix_server = await asyncio.start_unix_server(
-                lambda r, w: _handle_client(r, w, bridge, stop, browser, browser_pid),
-                path=str(SOCKET_PATH),
-            )
-            SOCKET_PATH.chmod(0o600)
-
-            print(f"apwlib daemon ready ({browser.name}); socket at {SOCKET_PATH}", flush=True)
-            try:
-                await stop
-            finally:
-                # Stop accepting clients BEFORE the browser teardown that runs on
-                # leaving the async-with (it can take seconds). Shutdown order the
-                # client relies on: socket first, browser next, lock last.
-                unix_server.close()
-                with contextlib.suppress(FileNotFoundError):
-                    SOCKET_PATH.unlink()
-    except ExtensionNotFoundError as exc:
-        # Only the store download can raise this here: a first-ever fetch failed
-        # with no cache to fall back on. Say so in apwlib's error vocabulary.
-        raise ApwError(
-            Status.GENERIC_ERROR,
-            f"could not download the iCloud Passwords extension from the Chrome Web Store: {exc}",
-        ) from exc
+                try:
+                    await managed.serve(until=stop)  # returns on stop, or if the browser dies
+                finally:
+                    # Stop accepting clients BEFORE the browser teardown that runs on
+                    # leaving the async-with (it can take seconds). Shutdown order the
+                    # client relies on: socket first, browser next, lock last.
+                    unix_server.close()
+                    SOCKET_PATH.unlink(missing_ok=True)
+        except ExtensionNotFoundError as exc:
+            # Only the store download can raise this here: a first-ever fetch failed
+            # with no cache to fall back on. Say so in apwlib's error vocabulary.
+            raise ApwError(
+                Status.GENERIC_ERROR,
+                f"could not download the iCloud Passwords extension from the Chrome Web Store: {exc}",
+            ) from exc
     finally:
-        if watcher is not None:
-            watcher.cancel()
-        if unix_server is not None:
-            unix_server.close()
-        with contextlib.suppress(FileNotFoundError):
-            SOCKET_PATH.unlink()
         os.close(lock_fd)

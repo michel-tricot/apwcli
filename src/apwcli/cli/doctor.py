@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import typer
-from apwlib.browsers import BROWSERS, installed_browsers
+from apwlib.browsers import BREW_CASKS, BROWSERS, installed_browsers
 from apwlib.paths import APPLE_NATIVE_MANIFEST, cached_extension_version
 
 from apwcli.cli.common import app, client, status_line
@@ -29,7 +29,7 @@ def doctor() -> None:
         _line(True, "browser", ", ".join(b.name for b in browsers))
     else:
         prereqs_ok = False
-        casks = ", ".join(f"--cask {b.brew_cask}" for b in BROWSERS)
+        casks = ", ".join(f"--cask {BREW_CASKS[b.id]}" for b in BROWSERS)
         _line(False, "browser", "none installed", f"install one, e.g. brew install {casks}")
 
     # 2. Apple's native-messaging manifest (points at the keychain helper).

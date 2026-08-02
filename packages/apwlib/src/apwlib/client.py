@@ -22,7 +22,7 @@ from apwlib.errors import (
 )
 from apwlib.models import OTPEntry, PasswordEntry
 from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import WIRE_NO_BRIDGE, WIRE_UNPAIRED, Command, Status
+from apwlib.protocol import WIRE_UNPAIRED, Command, Status
 
 _NO_DAEMON = "daemon not running"  # local message on DaemonNotRunningError (not wire-matched)
 
@@ -40,6 +40,7 @@ class DaemonStatus(TypedDict):
 
 _TIMEOUT = 35.0
 _START_TIMEOUT = 45.0  # browser launch + extension load + bridge connect
+_CHALLENGE_TIMEOUT = 10.0  # challenge -> MSG1Set (the native round-trip the PIN must wait for)
 _PAIR_TIMEOUT = 20.0  # SRP round-trip after the PIN is entered
 _LOG_MAX_BYTES = 1_000_000  # rotate the daemon log once it grows past ~1 MB
 
@@ -87,33 +88,29 @@ class _Daemon:
                     break
                 buffer += chunk
             return json.loads(buffer.split(b"\n", 1)[0])
+        except (OSError, json.JSONDecodeError) as exc:
+            # The daemon went away mid-request (empty/truncated reply, reset, or
+            # timeout). Deliberately NOT DaemonNotRunningError: the request may
+            # already have executed, so deliver()'s auto-start retry must not
+            # re-send it.
+            raise SessionError(Status.INVALID_SESSION, "daemon connection lost mid-request") from exc
         finally:
             conn.close()
 
     def deliver(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Deliver a message, recovering from a missing daemon or a booting bridge.
+        """Deliver a message, auto-starting the daemon (if enabled) when none answers.
 
-        - no daemon -> auto-start (if enabled) and retry once, else ``DaemonNotRunningError``
-        - bridge not connected -> (auto-start) recover via ``start`` and retry once. This
-          covers both a bridge still booting and a wedged daemon (alive but bridge dead),
-          which ``start`` replaces rather than waiting on forever.
-
-        Returns the raw response; an ``unpaired`` response is surfaced to the facade, not
-        raised here.
+        One start, one retry — anything still wrong after that surfaces as the error
+        it is (`apwcli daemon restart` is the manual recovery). Returns the raw
+        response; an ``unpaired`` response is surfaced to the facade, not raised here.
         """
         try:
-            response = self._send_raw(message)
+            return self._send_raw(message)
         except DaemonNotRunningError:
             if not self._auto_start:
                 raise
-            self._spawn()
-            self._wait_bridge()
-            response = self._send_raw(message)  # retry once after starting
-
-        if _error(response) == WIRE_NO_BRIDGE and self._auto_start:
-            self.start()  # wait for a booting bridge, or replace a wedged daemon
-            response = self._send_raw(message)  # retry once after recovery
-        return response
+            self.start()
+            return self._send_raw(message)  # retry once after starting
 
     # -- lifecycle -------------------------------------------------------------
     def _spawn(self) -> None:
@@ -132,8 +129,7 @@ class _Daemon:
             names = ", ".join(b.name for b in BROWSERS)
             raise ApwError(
                 Status.GENERIC_ERROR,
-                f"no supported browser found — install one of: {names} "
-                "(e.g. `brew install --cask google-chrome`)",
+                f"no supported browser found — install one of: {names} (e.g. `brew install --cask google-chrome`)",
             )
         ensure_data_dir()
         _rotate_log()
@@ -150,7 +146,7 @@ class _Daemon:
     def _bridge_ready(self) -> bool:
         try:
             return bool(self._send_raw({"op": "status"}).get("bridge"))
-        except DaemonNotRunningError:
+        except SessionError:  # unreachable, or lost mid-poll — either way not ready
             return False
 
     def _wait_bridge(self, timeout: float = _START_TIMEOUT) -> bool:
@@ -165,6 +161,8 @@ class _Daemon:
         """True if the daemon's singleton lock can be taken (no daemon holds it)."""
         try:
             fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+        except FileNotFoundError:
+            return True  # no data dir yet -> nothing can be holding the lock
         except OSError:
             return False
         try:
@@ -192,18 +190,15 @@ class _Daemon:
         return False
 
     def start(self) -> bool:
-        """Ensure a daemon with a connected bridge is running.
+        """Ensure a daemon is running; returns True once its bridge is connected.
 
-        Auto-spawns if none is running. If a daemon is running but its bridge is dead
-        (a wedged singleton — e.g. the browser was closed), it is stopped and replaced,
-        since a fresh spawn would otherwise just lose the lock race and exit.
+        A no-op when one is already reachable. Otherwise spawns one — after waiting
+        out a stopping daemon's singleton lock, so `stop` immediately followed by
+        `start` works — and waits for the bridge to come up.
         """
-        status = self.status()
-        if status["running"] and status["bridge"]:
-            return True
-        if status["running"]:  # alive but unhealthy — replace it rather than defer to it
-            self.stop()
-            self._wait_stopped()
+        if self.status()["running"]:
+            return self._wait_bridge()
+        self._wait_stopped()  # a stopping daemon releases the lock last
         self._spawn()
         return self._wait_bridge()
 
@@ -253,31 +248,59 @@ class _Daemon:
         """Ask the extension to display the macOS pairing PIN."""
         self.deliver({"cmd": Command.HANDSHAKE})
 
+    def _wait_challenge_ready(self, timeout: float = _CHALLENGE_TIMEOUT) -> bool:
+        """Block until the challenge handshake is ready for the PIN (reaches ``MSG1Set``).
+
+        ``request_challenge`` kicks off an async native round-trip. Submitting the PIN
+        before it settles wedges the handshake at ``MSG1Set`` — it never completes and never
+        collapses, so pairing then burns the full ``wait_until_paired`` timeout. A human
+        typing the PIN off the macOS dialog leaves ample time; this closes the same gap for
+        programmatic callers that verify with no delay. Returns ``False`` on timeout, and the
+        caller proceeds anyway so a divergent state machine can't hang here.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                state = self._send_raw({"op": "status"}).get("pairing_state")
+            except SessionError:
+                return False
+            if state == "MSG1Set":
+                return True
+            time.sleep(0.1)
+        return False
+
     def verify_challenge(self, pin: str) -> None:
-        """Submit the PIN. Pairing completes asynchronously — see :meth:`wait_until_paired`."""
+        """Submit the PIN. Pairing completes asynchronously — see :meth:`wait_until_paired`.
+
+        Waits for the challenge to settle first (see :meth:`_wait_challenge_ready`), so a
+        PIN submitted immediately after :meth:`request_challenge` can't wedge the handshake.
+        """
+        self._wait_challenge_ready()
         self.deliver({"cmd": Command.HANDSHAKE, "pin": pin})
 
     def wait_until_paired(self, timeout: float = _PAIR_TIMEOUT) -> bool:
         """Block until the daemon reports a paired session, or the attempt fails/times out.
 
-        Fails fast on a collapsed handshake: once a handshake has been in progress and the
-        state falls back to ``NotInSession`` (e.g. the helper rejected a wrong PIN), returns
-        ``False`` immediately instead of polling until ``timeout``.
+        Call it only after :meth:`verify_challenge`: a handshake is then already in flight
+        (the challenge drove the state to ``MSG1Set``), so a return to ``NotInSession`` can
+        only mean the helper rejected the PIN. Report that at once rather than polling to
+        ``timeout``. A correct PIN advances ``MSG1Set`` -> ``SessionKeySet`` without ever
+        passing through ``NotInSession``, so this never trips on the success path.
+
+        Not gated on first observing ``MSG1Set``: a wrong PIN collapses in well under the
+        poll interval, so the pending state is routinely gone before the first read — the
+        old gate then mistook the collapse for "not started yet" and waited the full timeout.
         """
         deadline = time.monotonic() + timeout
-        saw_pending = False
         while time.monotonic() < deadline:
             try:
                 resp = self._send_raw({"op": "status"})
-            except DaemonNotRunningError:
+            except SessionError:  # daemon gone (or lost mid-poll) — pairing can't complete
                 return False
             if resp.get("paired"):
                 return True
-            state = resp.get("pairing_state")
-            if state and state != "NotInSession":
-                saw_pending = True  # a handshake is under way
-            elif state == "NotInSession" and saw_pending:
-                return False  # it collapsed back to idle — the PIN was rejected
+            if resp.get("pairing_state") == "NotInSession":
+                return False  # collapsed back to idle — the PIN was rejected
             time.sleep(0.2)
         return False
 
@@ -338,16 +361,11 @@ class ApplePasswords:
     # -- passwords -------------------------------------------------------------
     def get_login_names(self, url: str) -> list[PasswordEntry]:
         _require_url(url)
-        return [
-            PasswordEntry.from_raw(e) for e in self._payload(protocol.get_login_names_for_url(url))
-        ]
+        return [PasswordEntry.from_raw(e) for e in self._payload(protocol.get_login_names_for_url(url))]
 
     def get_password(self, url: str, login: str = "") -> list[PasswordEntry]:
         _require_url(url)
-        return [
-            PasswordEntry.from_raw(e)
-            for e in self._payload(protocol.get_password_for_url(url, login))
-        ]
+        return [PasswordEntry.from_raw(e) for e in self._payload(protocol.get_password_for_url(url, login))]
 
     def save_account(self, url: str, login: str, password: str) -> None:
         _require_url(url)

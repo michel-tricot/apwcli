@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from apwlib import NotPairedError, pinwindow
-from apwlib.browsers import Browser
+from apwlib.browsers import BrowserInfo
 from apwlib.pinwindow import request_pin
 from chauffeur.launch import LaunchError
 
@@ -54,16 +54,14 @@ def _install(monkeypatch: pytest.MonkeyPatch, fake_cls: type[_FakeWindow]) -> li
 
 
 @pytest.fixture
-def fake_browser(monkeypatch: pytest.MonkeyPatch) -> Browser:
-    browser = Browser(id="fake", name="Fake", binary=Path("/fake"), brew_cask="fake")
+def fake_browser(monkeypatch: pytest.MonkeyPatch) -> BrowserInfo:
+    browser = BrowserInfo(id="fake", name="Fake", binary=Path("/fake"), data_dir=None)
     monkeypatch.setattr(pinwindow, "_running_browser", lambda: None)
     monkeypatch.setattr(pinwindow, "resolve_browser", lambda _selected: browser)
     return browser
 
 
-def test_request_pin_returns_submitted_pin(
-    fake_browser: Browser, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_request_pin_returns_submitted_pin(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class Submits(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
             self._answer("123456")
@@ -84,9 +82,7 @@ def test_request_pin_returns_submitted_pin(
     assert window.spec.window.position == "top"  # chauffeur pins it to the top of the screen
 
 
-def test_request_pin_first_answer_wins(
-    fake_browser: Browser, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_request_pin_first_answer_wins(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class SubmitThenCloseBeacon(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
             self._answer("123456")
@@ -97,9 +93,7 @@ def test_request_pin_first_answer_wins(
     assert request_pin(timeout=5) == "123456"
 
 
-def test_request_pin_empty_pin_means_cancelled(
-    fake_browser: Browser, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_request_pin_empty_pin_means_cancelled(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class Cancels(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
             self._answer("")  # the page's close beacon posts an empty PIN
@@ -110,7 +104,7 @@ def test_request_pin_empty_pin_means_cancelled(
         request_pin(timeout=5)
 
 
-def test_request_pin_window_closed(fake_browser: Browser, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_request_pin_window_closed(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class ClosesUnanswered(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
             # The user closed the window: serve() returns on its own. Mimic chauffeur's
@@ -123,7 +117,7 @@ def test_request_pin_window_closed(fake_browser: Browser, monkeypatch: pytest.Mo
         request_pin(timeout=5)
 
 
-def test_request_pin_times_out(fake_browser: Browser, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_request_pin_times_out(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class NeverAnswers(_FakeWindow):
         def serve(self, *, until: threading.Event | None = None) -> None:
             assert until is not None and until.wait(5)  # released by the timeout timer
@@ -134,7 +128,7 @@ def test_request_pin_times_out(fake_browser: Browser, monkeypatch: pytest.Monkey
     assert created[0].closed
 
 
-def test_request_pin_launch_failure(fake_browser: Browser, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_request_pin_launch_failure(fake_browser: BrowserInfo, monkeypatch: pytest.MonkeyPatch) -> None:
     class FailsToOpen(_FakeWindow):
         def __enter__(self) -> _FakeWindow:
             raise LaunchError("no DevTools")
@@ -178,11 +172,8 @@ def _ps_result(lines: list[str]) -> object:
     return Result()
 
 
-def _browsers() -> list[Browser]:
-    return [
-        Browser(id=i, name=i.title(), binary=Path(f"/Applications/{i}"), brew_cask=i)
-        for i in ("brave", "chrome")
-    ]
+def _browsers() -> list[BrowserInfo]:
+    return [BrowserInfo(id=i, name=i.title(), binary=Path(f"/Applications/{i}"), data_dir=None) for i in ("brave", "chrome")]
 
 
 def test_running_browser_prefers_the_users_browser(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,10 +194,7 @@ def test_running_browser_none_when_only_managed_instances(
     monkeypatch.setattr(pinwindow, "installed_browsers", _browsers)
     lines = [
         "/Applications/brave --user-data-dir=" + str(pinwindow.BROWSER_PROFILE_DIR / "brave"),
-        (
-            "/Applications/chrome --app=file:///tmp/apwlib-pin-x/page.html "
-            "--user-data-dir=/tmp/apwlib-pin-x/profile"
-        ),
+        ("/Applications/chrome --app=file:///tmp/apwlib-pin-x/page.html --user-data-dir=/tmp/apwlib-pin-x/profile"),
     ]
     monkeypatch.setattr(pinwindow.subprocess, "run", lambda *a, **k: _ps_result(lines))
     assert pinwindow._running_browser() is None

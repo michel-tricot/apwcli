@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from apwlib.browsers import Browser
+from apwlib.browsers import BrowserInfo
 from typer.testing import CliRunner
 
 from apwcli.cli import app
 
 runner = CliRunner()
 
-_BROWSER = Browser(id="brave", name="Brave", binary=Path("/x"), brew_cask="brave-browser")
+_BROWSER = BrowserInfo(id="brave", name="Brave", binary=Path("/x"), data_dir=None)
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, *, browsers, manifest, version, status) -> None:
@@ -61,9 +61,7 @@ def test_doctor_fails_without_browser(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "brew install" in result.stdout
 
 
-def test_doctor_extension_not_cached_is_not_a_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_doctor_extension_not_cached_is_not_a_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     manifest = tmp_path / "m.json"
     manifest.write_text("{}")
     _stub(

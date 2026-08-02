@@ -33,8 +33,10 @@ def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
     state = {"paired": False}
 
     def fake_send_raw(msg):
-        if msg.get("op") == "status":  # wait_until_paired polls this
-            return {"running": True, "bridge": True, "paired": state["paired"]}
+        if msg.get("op") == "status":  # polled by _wait_challenge_ready and wait_until_paired
+            # MSG1Set = challenge settled and ready for the PIN; paired once verified.
+            pairing_state = "SessionKeySet" if state["paired"] else "MSG1Set"
+            return {"running": True, "bridge": True, "paired": state["paired"], "pairing_state": pairing_state}
         if msg.get("cmd") == 2:  # handshake (challenge or verify)
             if msg.get("pin") is not None:
                 state["paired"] = True
@@ -63,9 +65,42 @@ def test_unpaired_without_provider_raises(monkeypatch: pytest.MonkeyPatch) -> No
         pw.get_login_names("github.com")
 
 
+def test_daemon_lost_mid_request_raises_session_error() -> None:
+    # A daemon that accepts the connection but hangs up without replying must surface
+    # as SessionError — not a raw JSONDecodeError, and not DaemonNotRunningError
+    # (deliver()'s auto-start retry could re-send a request that already executed).
+    import socket
+    import threading
+
+    from apwlib.errors import SessionError
+
+    # /tmp, not tmp_path: macOS caps AF_UNIX socket paths at ~104 bytes.
+    sock_path = "/tmp/apwlib-test-hangup.sock"
+    Path(sock_path).unlink(missing_ok=True)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(sock_path)
+    server.listen(1)
+
+    def hang_up() -> None:
+        conn, _ = server.accept()
+        conn.close()  # reply-less close: the client reads EOF
+
+    thread = threading.Thread(target=hang_up, daemon=True)
+    thread.start()
+    try:
+        pw = ApplePasswords(socket_path=sock_path, auto_start=False)
+        with pytest.raises(SessionError) as excinfo:
+            pw.get_login_names("github.com")
+        assert not isinstance(excinfo.value, DaemonNotRunningError)
+    finally:
+        thread.join(timeout=5)
+        server.close()
+        Path(sock_path).unlink(missing_ok=True)
+
+
 def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
     pw = ApplePasswords()  # auto_start=True
-    calls = {"raw": 0, "spawn": 0, "wait": 0}
+    calls = {"raw": 0, "start": 0}
 
     def fake_send_raw(_msg):
         calls["raw"] += 1
@@ -74,15 +109,10 @@ def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> No
         return {"id": "1", "data": {"STATUS": int(Status.SUCCESS), "Entries": []}}
 
     monkeypatch.setattr(pw.daemon, "_send_raw", fake_send_raw)
-    monkeypatch.setattr(pw.daemon, "_spawn", lambda: calls.__setitem__("spawn", calls["spawn"] + 1))
-    monkeypatch.setattr(
-        pw.daemon,
-        "_wait_bridge",
-        lambda *a, **k: calls.__setitem__("wait", calls["wait"] + 1) or True,
-    )
+    monkeypatch.setattr(pw.daemon, "start", lambda: calls.__setitem__("start", calls["start"] + 1) or True)
 
     assert pw.get_login_names("github.com") == []
-    assert calls == {"raw": 2, "spawn": 1, "wait": 1}  # started once, retried once
+    assert calls == {"raw": 2, "start": 1}  # started once, retried once
 
 
 def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,44 +129,39 @@ def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
     spawned = []
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
+    monkeypatch.setattr(pw.daemon, "_wait_stopped", lambda *a, **k: True)
     monkeypatch.setattr(pw.daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)
     with pytest.raises(ApwError, match="no supported browser"):
         pw.get_login_names("github.com")
     assert spawned == []  # failed before launching/waiting on anything
 
 
-def test_start_replaces_a_wedged_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A daemon that is running but whose bridge is dead must be stopped and replaced,
-    # not deferred to (a fresh spawn would just lose the lock race).
-    daemon = ApplePasswords(auto_start=False).daemon
-    calls = {"stop": 0, "spawn": 0}
-    monkeypatch.setattr(
-        daemon, "status", lambda: {"running": True, "bridge": False, "paired": False}
-    )
-    monkeypatch.setattr(
-        daemon, "stop", lambda: calls.__setitem__("stop", calls["stop"] + 1) or True
-    )
-    monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: True)
-    monkeypatch.setattr(daemon, "_spawn", lambda: calls.__setitem__("spawn", calls["spawn"] + 1))
-    monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
-
-    assert daemon.start() is True
-    assert calls == {"stop": 1, "spawn": 1}
-
-
-def test_start_noop_when_bridge_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_noop_when_daemon_running(monkeypatch: pytest.MonkeyPatch) -> None:
     daemon = ApplePasswords(auto_start=False).daemon
     spawned = []
     monkeypatch.setattr(daemon, "status", lambda: {"running": True, "bridge": True, "paired": True})
+    monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
     monkeypatch.setattr(daemon, "_spawn", lambda: spawned.append(1))
 
     assert daemon.start() is True
-    assert spawned == []  # a healthy daemon is left alone
+    assert spawned == []  # a running daemon is left alone
 
 
-def test_singleton_free_detects_lock_holder(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_start_waits_out_a_stopping_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `stop` immediately followed by `start` must work: the stopping daemon releases
+    # its singleton lock last, so start() waits for the lock before spawning.
+    daemon = ApplePasswords(auto_start=False).daemon
+    order = []
+    monkeypatch.setattr(daemon, "status", lambda: {"running": False, "bridge": False, "paired": False})
+    monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: order.append("waited") or True)
+    monkeypatch.setattr(daemon, "_spawn", lambda: order.append("spawned"))
+    monkeypatch.setattr(daemon, "_wait_bridge", lambda *a, **k: True)
+
+    assert daemon.start() is True
+    assert order == ["waited", "spawned"]
+
+
+def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import fcntl
     import os
 
@@ -173,6 +198,45 @@ def test_wait_until_paired_fails_fast_on_collapsed_handshake(
     )
     monkeypatch.setattr(daemon, "_send_raw", lambda _m: next(responses))
     assert daemon.wait_until_paired(timeout=10) is False
+
+
+def test_verify_challenge_waits_for_the_handshake_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Submitting the PIN before the challenge reaches MSG1Set wedges the handshake. verify
+    # must poll until MSG1Set, then send the PIN — never the other way round.
+    daemon = ApplePasswords(auto_start=False).daemon
+    states = iter(["NotInSession", "NotInSession", "MSG1Set"])
+    events: list[str] = []
+
+    def fake_send_raw(msg: dict) -> dict:
+        if msg.get("op") == "status":
+            state = next(states)
+            events.append(f"poll:{state}")
+            return {"pairing_state": state}
+        events.append(f"pin:{msg.get('pin')}")
+        return {"status": int(Status.SUCCESS)}
+
+    monkeypatch.setattr(daemon, "_send_raw", fake_send_raw)
+    daemon.verify_challenge("123456")
+    assert events == ["poll:NotInSession", "poll:NotInSession", "poll:MSG1Set", "pin:123456"]
+
+
+def test_wait_until_paired_fails_fast_when_collapse_beats_first_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The bug behind the ~22s "hang": a wrong PIN collapses MSG1Set -> NotInSession faster
+    # than the first status poll, so the very first read is already NotInSession. Since
+    # wait_until_paired is only called with a handshake in flight, that is a rejection and
+    # must fail immediately — the old saw_pending gate polled the full timeout instead.
+    daemon = ApplePasswords(auto_start=False).daemon
+    polls = {"n": 0}
+
+    def fake_send_raw(_m: dict) -> dict:
+        polls["n"] += 1
+        return {"paired": False, "pairing_state": "NotInSession"}
+
+    monkeypatch.setattr(daemon, "_send_raw", fake_send_raw)
+    assert daemon.wait_until_paired(timeout=10) is False
+    assert polls["n"] == 1  # decided on the first read, no timeout loop
 
 
 def test_wait_until_paired_true_when_paired(monkeypatch: pytest.MonkeyPatch) -> None:

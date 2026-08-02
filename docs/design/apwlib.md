@@ -179,7 +179,9 @@ daemon/
   server.py     owns the browser (via chauffeur); drives the bridge over the
                   worker channel; unix-socket server; singleton lock
   extension.py  the chauffeur ExtensionSpec (store download, refreshed per build,
-                  cache pinned for doctor) that appends bridge.js
+                  cache pinned for doctor) that injects the wire constants
+                  (inject_config; protocol.py stays their single source) and
+                  appends bridge.js
   bridge.js     JavaScript bridge appended to the extension's background worker
   bridge.py     loads bridge.js
 ```
@@ -210,19 +212,19 @@ Because a pairing can't be persisted (Part 1), the model is: pair once per
 daemon lifetime, keep the daemon (hence the browser and its in-memory session)
 alive to make the PIN rare.
 
-A running daemon can outlive its bridge (the browser is killed, the worker
-gone) and get stuck: a fresh spawn would only lose the singleton-lock race and
-exit. So `start` treats *running but bridge-dead* as unhealthy — it stops that
-daemon and replaces it — and `deliver` routes a `no extension connected`
-response through the same recovery, so commands self-heal instead of waiting on
-a bridge that will never come. `restart` (exposed as `apwcli daemon restart`)
-forces the stop-and-replace unconditionally.
+Recovery is deliberately manual: the client auto-starts a missing daemon (one
+spawn, one retry), and anything beyond that is `apwcli daemon restart` — a
+stop-and-respawn. There is no self-healing of a sick daemon; a vanilla
+chauffeur session plus a restart command has proven more reliable than layered
+recovery logic.
 
-Replacing a daemon waits for the *lock* to free, not the socket: on shutdown a
-daemon closes its socket first but releases the singleton lock last (after
+Spawning waits for the *lock* to free, not the socket: on shutdown a daemon
+closes its socket first but releases the singleton lock last (after
 terminating the browser), so a spawn triggered by the socket going away would
 lose the lock race and exit as "already running". The client polls the lock
-(a non-blocking `flock` attempt) until it can be taken before spawning.
+(a non-blocking `flock` attempt) until it can be taken before spawning, which
+is what makes `stop` immediately followed by `start` (or any auto-starting
+command) work.
 
 ## Pairing in the library
 
@@ -248,14 +250,19 @@ this window otherwise.
 ## The bridge
 
 `daemon/bridge.js` runs in the extension's MV3 service worker, which holds the
-pairing — if it dies, the user must re-PIN. It is written to never throw out of
-an event handler:
+pairing — if it dies, the user must re-PIN. Its hardening:
 
 - Global `error` / `unhandledrejection` handlers `preventDefault()` stray
-  failures so the worker isn't torn down.
-- Every extension/native call is wrapped; every extension global is
-  `typeof`-guarded (an undeclared global would `ReferenceError` and kill it).
+  failures from the extension's own code so the worker isn't torn down.
+- Every extension global is `typeof`-guarded (an undeclared global would
+  `ReferenceError`). A throw out of a `py_chauffeur.on` handler is already safe —
+  chauffeur's channel converts it into an error reply — so the bridge's own
+  wrapping exists to return precise statuses, and to protect the native-port
+  listener, which chauffeur does not wrap.
 - Requests are validated (cmd/qid/body shape) **before** the crypto/native layer.
+- Status codes, the native timeout, and the `unpaired` wire marker arrive in an
+  injected `__chauffeur_config` global (see `extension.py`), so nothing is
+  mirrored between JS and Python.
 - A single in-flight request has a native-reply timeout, so a request the helper
   never answers is released instead of wedging the bridge.
 - It reaches the daemon over chauffeur's `py_chauffeur` channel: a `request`
