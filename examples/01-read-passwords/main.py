@@ -36,7 +36,10 @@ def main() -> int:
         return 0
 
     for entry in entries:
-        print(f"{entry.username}: {entry.password}")
+        # entry.password holds the real value; keep it out of the terminal
+        # (and its scrollback) — hand it to whatever needs it instead.
+        redacted = "••••••••" if entry.password else "(no password)"
+        print(f"{entry.username}: {redacted}")
     return 0
 
 
