@@ -69,6 +69,28 @@ $ uv run mkdocs build --strict   # or: mkdocs serve
 generated from docstrings — keep docstrings in plain Markdown (backtick code
 spans, no reST roles), since mkdocstrings renders them verbatim.
 
+## Releasing
+
+`apwcli` and `apwlib` are published to PyPI **in lockstep**: one version for
+both, and the root `pyproject.toml` pins `apwlib==<version>`. To cut a release:
+
+```console
+$ scripts/bump.sh 0.2.0      # both pyprojects + the pin + uv.lock
+$ scripts/check.sh
+$ git commit -am "Release 0.2.0" && git push
+$ git tag v0.2.0 && git push origin v0.2.0
+```
+
+The tag triggers `.github/workflows/release.yml`, which verifies the lockstep
+versions match the tag, builds both packages (`uv build --all-packages`),
+publishes them to PyPI via Trusted Publishing (OIDC — no tokens stored), and
+creates the GitHub release with generated notes and the artifacts attached.
+
+One-time setup: on PyPI, add a trusted publisher for **both** project names
+(`apwcli` and `apwlib`): owner `michel-tricot`, repository `apwcli`, workflow
+`release.yml`. Before the first release, register them as *pending*
+publishers (pypi.org → Publishing) so the names are claimed by the workflow.
+
 ## Common commands
 
 ```console

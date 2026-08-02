@@ -1,0 +1,54 @@
+name: Release
+
+# Publishes apwlib and apwcli to PyPI (in lockstep) when a v* tag is pushed,
+# then creates the GitHub release. Uses PyPI Trusted Publishing (OIDC), so no
+# API token is stored; configure a trusted publisher for BOTH project names
+# first (see the Releasing notes in AGENTS.md).
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # PyPI Trusted Publishing (OIDC)
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Check lockstep versions match the tag
+        run: |
+          uv run --no-project python - <<'PY'
+          import os, sys, tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          cli = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          lib = tomllib.load(open("packages/apwlib/pyproject.toml", "rb"))["project"]
+          pin = next(d for d in cli["dependencies"] if d.startswith("apwlib"))
+          problems = []
+          if f"v{cli['version']}" != tag:
+              problems.append(f"apwcli {cli['version']} != {tag}")
+          if lib["version"] != cli["version"]:
+              problems.append(f"apwlib {lib['version']} != apwcli {cli['version']}")
+          if pin != f"apwlib=={cli['version']}":
+              problems.append(f"pin {pin!r} != apwlib=={cli['version']}")
+          if problems:
+              sys.exit("; ".join(problems))
+          print(f"lockstep ok: {cli['version']}")
+          PY
+
+      - name: Build both packages
+        run: uv build --all-packages
+
+      - name: Publish apwlib and apwcli to PyPI
+        run: uv publish --trusted-publishing always
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}

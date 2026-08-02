@@ -8,7 +8,9 @@ description = "Command-line interface for apwlib."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["apwlib", "typer>=0.12", "rich>=13", "fastmcp>=3"]
+# apwlib is pinned in lockstep (both packages release together with one version);
+# scripts/bump.sh keeps the three version spots in sync.
+dependencies = ["apwlib==0.1.0", "typer>=0.12", "rich>=13", "fastmcp>=3"]
 
 [project.scripts]
 apwcli = "apwcli.cli:main"
