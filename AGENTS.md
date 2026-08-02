@@ -83,8 +83,10 @@ $ git tag v0.2.0 && git push origin v0.2.0
 
 The tag triggers `.github/workflows/release.yml`, which verifies the lockstep
 versions match the tag, builds both packages (`uv build --all-packages`),
-publishes them to PyPI via Trusted Publishing (OIDC — no tokens stored), and
-creates the GitHub release with generated notes and the artifacts attached.
+publishes them to PyPI via Trusted Publishing (OIDC — no tokens stored),
+creates the GitHub release with generated notes and the artifacts attached,
+and bumps `Formula/apwcli.rb` in `michel-tricot/homebrew-tap` (needs the
+`TAP_PUSH_TOKEN` repo secret — a PAT with push access to the tap).
 
 One-time setup: on PyPI, add a trusted publisher for **both** project names
 (`apwcli` and `apwlib`): owner `michel-tricot`, repository `apwcli`, workflow

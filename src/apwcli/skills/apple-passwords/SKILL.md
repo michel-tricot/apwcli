@@ -8,7 +8,7 @@ description: Read and save Apple Passwords (iCloud Keychain) credentials and one
 apwcli reads and writes Apple Passwords through a background daemon it manages
 itself — never start or supervise anything. Requires macOS. If `apwcli` is not
 on PATH (command not found), ask the user before installing it:
-`uv tool install apwcli` (or `pipx install apwcli`).
+`brew install michel-tricot/tap/apwcli` (or `uv tool install apwcli`).
 
 ## Pairing (needed once per daemon lifetime)
 

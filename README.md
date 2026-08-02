@@ -29,7 +29,7 @@ Read passwords and one-time codes, save logins, script it all.
 ## Install
 
 ```sh
-uv tool install apwcli    # or: pipx install apwcli
+brew install michel-tricot/tap/apwcli   # or: uv tool install apwcli, pipx install apwcli
 ```
 
 Or from a clone: `uv sync`, then `uv run apwcli --help`.

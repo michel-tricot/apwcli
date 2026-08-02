@@ -26,7 +26,7 @@ the vault to your terminal, your scripts, and your agents.
 ## Install
 
 ```sh
-uv tool install apwcli    # or: pipx install apwcli
+brew install michel-tricot/tap/apwcli   # or: uv tool install apwcli, pipx install apwcli
 ```
 
 For the library only:
