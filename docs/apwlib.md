@@ -18,8 +18,8 @@ from apwlib import ApplePasswords
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
 
-pw.list_accounts("github.com")  # accounts for a site -> list[PasswordEntry]
-pw.get_password("github.com", "me@example.com")  # -> list[PasswordEntry]
+pw.get_password("github.com")  # entries for a site -> list[PasswordEntry]
+pw.get_password("github.com", "me@example.com")  # narrow to one account
 pw.save_password("example.com", "me@example.com", "s3cret")  # create/update
 pw.list_otp("github.com")  # accounts with codes -> list[OTPEntry]
 pw.get_otp("github.com")  # the current code(s) -> list[OTPEntry]
@@ -48,8 +48,7 @@ print(entry.username, entry.domain, entry.password)
 #> me@example.com github.com hunter2
 ```
 
-`PasswordEntry.password` is `None` when the vault withholds it (e.g. from
-`list_accounts`, which never carries passwords).
+`PasswordEntry.password` is `None` when the vault withholds it.
 
 ## Errors
 

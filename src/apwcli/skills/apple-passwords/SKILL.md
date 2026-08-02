@@ -24,12 +24,10 @@ read it.** Run:
 
 Always use machine-readable output instead of parsing tables:
 
-- `apwcli pw list <url> -o json` — accounts saved for a site (usernames, no
-  passwords). URLs match by registrable domain: `github.com`, a full URL, or a
-  subdomain all hit the same accounts. There is no list-everything command —
-  every read needs a URL.
-- `apwcli pw get <url> [username] -o json` — password entries. `-o text` is
-  TSV for piping.
+- `apwcli pw get <url> [username] -o json` — password entries for a site.
+  URLs match by registrable domain: `github.com`, a full URL, or a subdomain
+  all hit the same entries. There is no list-everything command — every read
+  needs a URL. `-o text` is TSV for piping.
 - `apwcli otp get <url> -o json` — the current one-time code (for 2FA
   prompts). `apwcli otp list <url> -o json` shows which accounts have codes.
 

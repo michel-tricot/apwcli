@@ -61,7 +61,7 @@ push and pull request, so anything skipped locally will fail there.
 
 ```console
 $ uv sync                        # install/refresh the workspace
-$ uv run apwcli pw list github.com   # run the CLI
+$ uv run apwcli pw get github.com    # run the CLI
 $ uv run ruff format .           # format
 $ uv run ruff check --fix .      # lint with autofix
 $ uv build --all-packages        # build both wheels/sdists into dist/

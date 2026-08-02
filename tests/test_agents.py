@@ -50,11 +50,11 @@ def test_mcp_server_hides_passwords_by_default() -> None:
         "status",
         "start_pairing",
         "submit_pin",
-        "list_accounts",
         "get_otp",
         "save_password",
     } <= tools
     assert "get_password" not in tools
+    assert "list_accounts" not in tools  # the helper has no account-listing primitive
 
 
 def test_mcp_server_allow_passwords_opt_in() -> None:

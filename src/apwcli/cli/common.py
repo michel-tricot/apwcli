@@ -118,8 +118,8 @@ def render_status(st: Mapping[str, object]) -> None:
 def _columns(rows: list[dict[str, Any]]) -> list[str]:
     """Column keys in first-seen order, dropping any empty in every row.
 
-    Keeps `pw list` (no passwords retrieved) from showing an empty password column while
-    `pw get` (passwords present) still does.
+    Keeps `otp list` (no codes retrieved) from showing an empty code column while
+    `otp get` (codes present) still does.
     """
     keys = list({key: None for row in rows for key in row})
     return [k for k in keys if any(row.get(k) not in (None, "", []) for row in rows)]

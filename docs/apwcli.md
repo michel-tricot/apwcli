@@ -49,8 +49,8 @@ daemon start; `downloads on daemon start` before the first run).
 ## Passwords
 
 ```console
-$ apwcli pw list github.com                    # accounts for a site
-$ apwcli pw get github.com me@example.com      # password entry (masked in the table)
+$ apwcli pw get github.com                     # entries for a site (passwords masked)
+$ apwcli pw get github.com me@example.com      # narrow to one account
 $ apwcli pw get github.com me@example.com --show   # reveal in the table
 $ apwcli pw get github.com me@example.com -c   # copy to clipboard, print nothing
 $ apwcli pw save github.com me@example.com     # create/update (prompts)
@@ -84,7 +84,7 @@ Password and OTP commands take `--format` / `-o`:
 - `text` — tab-separated values, no header, for `cut`/`awk`/`grep`.
 
 ```console
-$ apwcli pw list github.com --format json
+$ apwcli otp list github.com --format json
 {"results": [{"username": "me@example.com", "domain": "github.com"}], "status": 0}
 
 $ apwcli pw get github.com me@example.com -o text | cut -f3
@@ -147,8 +147,8 @@ $ apwcli mcp install claude-code # or name one: claude-desktop, cursor, vscode,
 $ apwcli mcp run                 # the stdio server itself (clients start this)
 ```
 
-The server exposes `status`, `start_pairing`/`submit_pin`, `list_accounts`
-(usernames only), `get_otp`, and `save_password`. Plaintext password reads are
+The server exposes `status`, `start_pairing`/`submit_pin`, `get_otp`, and
+`save_password`. Plaintext password reads are
 excluded by default because MCP tool results travel to the model provider —
 opt in by configuring the client to run `apwcli mcp run --allow-passwords`.
 

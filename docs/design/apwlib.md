@@ -102,7 +102,6 @@ The plaintext `body` the extension encrypts, per operation:
 
 | operation | `cmd` | `qid` | `body` |
 | --- | --- | --- | --- |
-| list accounts | 4 | `CmdGetLoginNames4URL` | `{ACT:5 (GHOST_SEARCH), URL}` |
 | get password | 5 | `CmdGetPassword4LoginName` | `{ACT:2 (SEARCH), URL, USR}` |
 | save account | 6 | `CmdSetPassword4LoginName_URL` | `{ACT:4 (MAYBE_ADD), URL:"",USR:"",PWD:"", NURL,NUSR,NPWD}` |
 | get OTP | 17 | `CmdDidFillOneTimeCode` | `{ACT:2, TYPE:"oneTimeCodes", frameURLs:[url]}` |
@@ -114,7 +113,9 @@ The plaintext `body` the extension encrypts, per operation:
 - **Status codes:** `SUCCESS 0, GENERIC 1, INVALID_PARAM 2, NO_RESULTS 3,
   FAILED_DELETE 4, FAILED_UPDATE 5, INVALID_MESSAGE 6, DUPLICATE 7,
   UNKNOWN_ACTION 8, INVALID_SESSION 9, SERVER_ERROR 100`.
-- **Save quirk:** a save (`cmd 6`) is answered as `cmd 4`.
+- **Save quirk:** a save (`cmd 6`) is answered as `cmd 4`. (`cmd 4` is
+  nominally "get login names", but the helper doesn't support that primitive
+  as a request — it only appears as this reply.)
 - **Scope:** every read is keyed to a URL, matched by **registrable domain**.
   There is no enumerate-all command — the protocol is built for per-site
   autofill, so listing an entire vault isn't possible through it.
@@ -332,7 +333,7 @@ class OTPEntry:
 | Runtime | Auto-managed singleton daemon | Owns the browser and the in-memory session; auto-starts detached and is reused, so the PIN is entered once per daemon lifetime. |
 | CLI secrets | Mask in tables, clipboard opt-in | Passwords otherwise land in terminal scrollback. `text`/`json` (pipe targets) stay unmasked; `-c` routes the value via `pbcopy`, never stdout. |
 | No-TTY pairing | App-mode PIN window | The PIN must be typed by a human at the screen. A chromeless `--app` window of the managed browser looks like a native dialog and adds no dependency; PyObjC (heavy) and osascript (crude) lost. |
-| MCP scope | No plaintext passwords by default | MCP tool results are sent to the model provider. `list_accounts`/`get_otp`/`save_password` are safe; `get_password` is gated behind `--allow-passwords`. |
+| MCP scope | No plaintext passwords by default | MCP tool results are sent to the model provider. `get_otp`/`save_password` are safe; `get_password` is gated behind `--allow-passwords`. |
 | Dependencies | `chauffeur` (lib), `typer`/`rich`/`fastmcp` (CLI) | chauffeur is the browser control plane *and* the bridge transport (its worker channel carries the daemon↔extension messages), so there's no separate socket server and no crypto dependency. |
 | Platform | macOS 14+, Python ≥ 3.12 | The helper, extension, and PIN flow are macOS-only; a non-macOS spawn fails with a clear error. chauffeur sets the Python floor. |
 

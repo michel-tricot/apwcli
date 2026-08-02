@@ -49,14 +49,6 @@ def build_server(allow_passwords: bool = False) -> FastMCP:
         return {"paired": daemon.verify_challenge(pin)}
 
     @server.tool
-    def list_accounts(url: str) -> list[dict[str, Any]]:
-        """List the accounts saved for a site (usernames only, never passwords)."""
-        rows = _rows(client.list_accounts(url))
-        for row in rows:
-            row.pop("password", None)  # defense in depth; ghost search omits it anyway
-        return rows
-
-    @server.tool
     def get_otp(url: str) -> list[dict[str, Any]]:
         """The current one-time code(s) for a site."""
         return _rows(client.get_otp(url))

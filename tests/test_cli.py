@@ -126,35 +126,35 @@ def test_otp_get_filters_by_username(monkeypatch: pytest.MonkeyPatch) -> None:
     assert copied == [b"222222"]  # the username narrows an otherwise ambiguous copy
 
 
-def test_pw_list_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw_get_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
-    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
-    result = runner.invoke(app, ["pw", "list", "github.com", "--format", "text"])
+    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _u=None: entries)
+    result = runner.invoke(app, ["pw", "get", "github.com", "--format", "text"])
     assert result.exit_code == 0
     assert "me@example.com\tgithub.com" in result.stdout
 
 
-def test_pw_list_json_format(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw_get_json_format(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com")]
-    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
-    result = runner.invoke(app, ["pw", "list", "github.com", "--format", "json"])
+    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _u=None: entries)
+    result = runner.invoke(app, ["pw", "get", "github.com", "--format", "json"])
     assert result.exit_code == 0
     assert '"results"' in result.stdout and "me@example.com" in result.stdout
 
 
-def test_pw_list_table_omits_empty_password_column(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import PasswordEntry
+def test_otp_list_table_omits_empty_code_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apwlib import OTPEntry
 
-    entries = [PasswordEntry(username="me@example.com", domain="github.com", password=None)]
-    monkeypatch.setattr("apwcli.cli.client.list_accounts", lambda _url: entries)
-    result = runner.invoke(app, ["pw", "list", "github.com"])
+    entries = [OTPEntry(username="me@example.com", domain="github.com", code=None)]
+    monkeypatch.setattr("apwcli.cli.client.list_otp", lambda _url: entries)
+    result = runner.invoke(app, ["otp", "list", "github.com"])
     assert result.exit_code == 0
     assert "username" in result.stdout
-    assert "password" not in result.stdout
+    assert "code" not in result.stdout
 
 
 def test_pw_get_table_masks_password_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -297,25 +297,25 @@ def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch)
     assert saved == [("example.com", "me@example.com", "s3cret")]
 
 
-def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw_get_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import DaemonNotRunningError
 
-    def boom(_url: str):
+    def boom(_url: str, _u=None):
         raise DaemonNotRunningError()
 
-    monkeypatch.setattr("apwcli.cli.client.list_accounts", boom)
-    result = runner.invoke(app, ["pw", "list", "https://github.com"])
+    monkeypatch.setattr("apwcli.cli.client.get_password", boom)
+    result = runner.invoke(app, ["pw", "get", "https://github.com"])
     assert result.exit_code == 9
 
 
-def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw_get_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import NotPairedError
 
-    def boom(_url: str):
+    def boom(_url: str, _u=None):
         raise NotPairedError("session is not paired")
 
-    monkeypatch.setattr("apwcli.cli.client.list_accounts", boom)
-    result = runner.invoke(app, ["pw", "list", "github.com"])
+    monkeypatch.setattr("apwcli.cli.client.get_password", boom)
+    result = runner.invoke(app, ["pw", "get", "github.com"])
     assert result.exit_code == 9
     assert "apwcli daemon pair" in result.stderr
 

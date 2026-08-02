@@ -33,13 +33,10 @@ from apwlib import ApplePasswords, ApwError, SessionError
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
 
-# Accounts saved for a site. Matching is by registrable domain: a bare host,
-# a full URL, or a subdomain all resolve to the same accounts.
-for account in pw.list_accounts("github.com"):
-    print(account.username, account.domain, account.title)
-
-# Passwords — narrow with a username, or omit it for every match.
-# An empty list means no match; reads don't raise for "not found".
+# Entries for a site. Matching is by registrable domain: a bare host, a full
+# URL, or a subdomain all resolve to the same entries. Narrow with a username,
+# or omit it for every match. An empty list means no match; reads don't raise
+# for "not found".
 for entry in pw.get_password("github.com", "me@example.com"):
     print(entry.username, "->", entry.password)
 
@@ -55,7 +52,7 @@ for code in pw.get_otp("github.com"):
 # The paired session lives in the browser and can drop; catch SessionError
 # to re-pair, or ApwError for anything protocol-level.
 try:
-    pw.list_accounts("github.com")
+    pw.get_password("github.com")
 except SessionError:
     print("session dropped — pair again")
 except ApwError as exc:
@@ -107,8 +104,7 @@ print(entry.username, entry.domain, entry.password)
 #> me@example.com github.com hunter2
 ```
 
-`PasswordEntry.password` is `None` when the vault withholds it (e.g. from
-`list_accounts`, which never carries passwords).
+`PasswordEntry.password` is `None` when the vault withholds it.
 
 ## Errors
 

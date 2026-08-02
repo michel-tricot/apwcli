@@ -38,15 +38,6 @@ def _generate_password(length: int, symbols: bool) -> str:
     return "".join(chars)
 
 
-@pw_app.command("list")
-def pw_list(url: str, fmt: FormatOption = Format.table) -> None:
-    """List accounts saved for a URL."""
-    try:
-        emit(client.list_accounts(url), fmt)
-    except ApwError as exc:
-        fail(exc, fmt)
-
-
 @pw_app.command("get")
 def pw_get(
     url: str,

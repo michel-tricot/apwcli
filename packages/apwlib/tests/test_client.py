@@ -13,7 +13,7 @@ def test_no_daemon_raises_daemon_not_running() -> None:
     # DaemonNotRunningError (not a generic session error).
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock", auto_start=False)
     with pytest.raises(DaemonNotRunningError):
-        pw.list_accounts("github.com")
+        pw.get_password("github.com")
 
 
 def test_unpaired_response_raises_not_paired(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,7 +24,7 @@ def test_unpaired_response_raises_not_paired(monkeypatch: pytest.MonkeyPatch) ->
         lambda _msg: {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"},
     )
     with pytest.raises(NotPairedError):
-        pw.list_accounts("github.com")
+        pw.get_password("github.com")
 
 
 def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,7 +46,7 @@ def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
         }
 
     monkeypatch.setattr(pw._daemon, "_send_raw", fake_send_raw)
-    result = pw.list_accounts("github.com")
+    result = pw.get_password("github.com")
     assert prompted  # the PIN provider was invoked
     assert [e.username for e in result] == ["me"]
 
@@ -59,7 +59,7 @@ def test_unpaired_without_provider_raises(monkeypatch: pytest.MonkeyPatch) -> No
         lambda _m: {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"},
     )
     with pytest.raises(NotPairedError):
-        pw.list_accounts("github.com")
+        pw.get_password("github.com")
 
 
 def test_daemon_lost_mid_request_raises_session_error() -> None:
@@ -87,7 +87,7 @@ def test_daemon_lost_mid_request_raises_session_error() -> None:
     try:
         pw = ApplePasswords(socket_path=sock_path, auto_start=False)
         with pytest.raises(SessionError) as excinfo:
-            pw.list_accounts("github.com")
+            pw.get_password("github.com")
         assert not isinstance(excinfo.value, DaemonNotRunningError)
     finally:
         thread.join(timeout=5)
@@ -108,7 +108,7 @@ def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(pw._daemon, "_send_raw", fake_send_raw)
     monkeypatch.setattr(pw._daemon, "start", lambda: calls.__setitem__("start", calls["start"] + 1) or True)
 
-    assert pw.list_accounts("github.com") == []
+    assert pw.get_password("github.com") == []
     assert calls == {"raw": 2, "start": 1}  # started once, retried once
 
 
@@ -116,7 +116,7 @@ def test_spawn_off_macos_fails_with_clear_error(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(sys, "platform", "linux")
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
     with pytest.raises(ApwError, match="macOS"):
-        pw.list_accounts("github.com")
+        pw.get_password("github.com")
 
 
 def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,7 +129,7 @@ def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(pw._daemon, "_wait_stopped", lambda *a, **k: True)
     monkeypatch.setattr(pw._daemon, "_wait_bridge", lambda *a, **k: spawned.append("waited") or True)
     with pytest.raises(ApwError, match="no supported browser"):
-        pw.list_accounts("github.com")
+        pw.get_password("github.com")
     assert spawned == []  # failed before launching/waiting on anything
 
 

@@ -344,11 +344,6 @@ class ApplePasswords:
             raise error_for(status, response.get("error"))
 
     # -- passwords -------------------------------------------------------------
-    def list_accounts(self, url: str) -> list[PasswordEntry]:
-        """The accounts saved for a site (usernames only, never passwords)."""
-        _require_url(url)
-        return [PasswordEntry._from_raw(e) for e in self._payload(protocol.get_login_names_for_url(url))]
-
     def get_password(self, url: str, username: str | None = None) -> list[PasswordEntry]:
         """Password entries for a site, optionally restricted to ``username``."""
         _require_url(url)

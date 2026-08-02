@@ -2,21 +2,12 @@ import pytest
 from apwlib import Status
 from apwlib._errors import ApwError
 from apwlib._protocol import (
-    Action,
     Command,
     entries_from,
-    get_login_names_for_url,
     get_otp_for_url,
     get_password_for_url,
     save_account_for_url,
 )
-
-
-def test_get_login_names_builder() -> None:
-    msg = get_login_names_for_url("https://github.com")
-    assert msg["cmd"] == Command.GET_LOGIN_NAMES_FOR_URL
-    assert msg["qid"] == "CmdGetLoginNames4URL"
-    assert msg["body"] == {"ACT": Action.GHOST_SEARCH, "URL": "https://github.com"}
 
 
 def test_get_password_builder_includes_login() -> None:

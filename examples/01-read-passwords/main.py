@@ -1,4 +1,4 @@
-"""List the accounts saved for a site, then read a password.
+"""Read the password entries saved for a site.
 
 Usage:
 
@@ -24,23 +24,19 @@ def main() -> int:
     pw = ApplePasswords(pin_provider=request_pin)
 
     try:
-        accounts = pw.list_accounts(url)  # usernames only, never passwords
+        # Narrow with a username, or omit it for every entry saved for the site.
+        entries = pw.get_password(url, username)
     except SessionError as exc:
         # Daemon unreachable or pairing declined — see `apwcli doctor`.
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if not accounts:
-        print(f"no accounts saved for {url}")
+    if not entries:
+        print(f"no entries saved for {url}")
         return 0
 
-    print(f"accounts for {url}:")
-    for account in accounts:
-        print(f"  {account.username}")
-
-    # Passwords are a separate, explicit read; narrow with a username or get all.
-    for entry in pw.get_password(url, username):
-        print(f"password for {entry.username}: {entry.password}")
+    for entry in entries:
+        print(f"{entry.username}: {entry.password}")
     return 0
 
 

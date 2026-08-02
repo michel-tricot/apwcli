@@ -11,10 +11,14 @@ from typing import Any
 
 
 class Command(IntEnum):
-    """Commands the client sends. See docs/design/apwlib.md for the full helper vocabulary."""
+    """Commands the client sends. See docs/design/apwlib.md for the full helper vocabulary.
+
+    cmd 4 (get login names) is deliberately absent: the helper doesn't support that
+    primitive. The value still appears on the wire as the reply cmd of a save (see
+    the matcher in bridge.js).
+    """
 
     HANDSHAKE = 2
-    GET_LOGIN_NAMES_FOR_URL = 4
     GET_PASSWORD_FOR_LOGIN_NAME = 5
     SET_PASSWORD_FOR_LOGIN_NAME_AND_URL = 6
     GET_ONE_TIME_CODES = 16
@@ -54,17 +58,6 @@ WIRE_UNPAIRED = "unpaired"
 
 def _with_scheme(url: str) -> str:
     return url if "://" in url else f"http://{url}"
-
-
-def get_login_names_for_url(url: str) -> dict[str, Any]:
-    return {
-        "cmd": Command.GET_LOGIN_NAMES_FOR_URL,
-        "qid": "CmdGetLoginNames4URL",
-        "tabId": 1,
-        "frameId": 1,
-        "url": url,
-        "body": {"ACT": Action.GHOST_SEARCH, "URL": url},
-    }
 
 
 def get_password_for_url(url: str, login: str = "") -> dict[str, Any]:

@@ -40,8 +40,8 @@ from the Chrome Web Store.
 ## Quick start
 
 ```sh
-apwcli pw list github.com                # accounts saved for a site
-apwcli pw get github.com me@example.com  # the password (masked on screen)
+apwcli pw get github.com                 # saved entries (passwords masked)
+apwcli pw get github.com me@example.com  # narrow to one account
 apwcli otp get github.com                # current one-time code
 ```
 
@@ -83,8 +83,8 @@ are in the [design notes](docs/design/apwlib.md). Found a vulnerability? See
 ### Passwords
 
 ```sh
-apwcli pw list github.com                     # accounts for a site
-apwcli pw get github.com me@example.com       # password entry, masked in the table
+apwcli pw get github.com                      # entries for a site, passwords masked
+apwcli pw get github.com me@example.com       # narrow to one account
 apwcli pw get github.com me@example.com -c    # copy to clipboard, print nothing
 apwcli pw get github.com me@example.com --show   # reveal in the table
 apwcli pw save github.com me@example.com      # create/update (prompts)
