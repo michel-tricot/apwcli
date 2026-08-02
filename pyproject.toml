@@ -32,7 +32,7 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 150
 target-version = "py312"
 # Markdown code blocks use pytest-examples' `#> output` convention and are
 # linted/formatted by tests/test_docs.py, not by ruff directly.

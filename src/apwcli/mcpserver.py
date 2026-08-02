@@ -17,9 +17,7 @@ from fastmcp import FastMCP
 
 
 def _rows(entries: list[Any]) -> list[dict[str, Any]]:
-    return [
-        {k: v for k, v in dataclasses.asdict(e).items() if v not in (None, "", [])} for e in entries
-    ]
+    return [{k: v for k, v in dataclasses.asdict(e).items() if v not in (None, "", [])} for e in entries]
 
 
 def build_server(allow_passwords: bool = False) -> FastMCP:

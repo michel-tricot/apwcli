@@ -112,11 +112,10 @@ $ apwcli daemon start            # pre-warm; --foreground to run attached,
 The log lives at `~/.apwlib/daemon.log` (records lifecycle and errors only, never
 plaintext secrets) and is rotated to `daemon.log.1` once it passes ~1 MB.
 
-The daemon runs detached and survives closing the terminal. If it ever wedges
-(running, but `extension disconnected` — e.g. its browser was killed),
-commands auto-recover by replacing it, and `apwcli daemon restart` does the
-same on demand; `daemon start` also replaces an unhealthy daemon rather than
-deferring to it. Pairing lasts for the daemon's lifetime — keep it running and
+The daemon runs detached and survives closing the terminal. Commands
+auto-start a missing daemon; for anything else that looks off (e.g.
+`extension disconnected` because its browser was killed), `apwcli daemon
+restart` replaces it with a fresh one. Pairing lasts for the daemon's lifetime — keep it running and
 the PIN stays rare. (A pairing cannot be persisted across restarts: the helper
 generates a fresh PIN per handshake by design — see the
 [design notes](design/apwlib.md).)

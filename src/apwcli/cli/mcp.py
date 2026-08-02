@@ -84,10 +84,7 @@ def _clients() -> list[Client]:
         Client(
             key="codex",
             label="Codex CLI",
-            manual=(
-                "Add to ~/.codex/config.toml:\n"
-                f'  [mcp_servers.apw]\n  command = "{command}"\n  args = ["mcp", "run"]'
-            ),
+            manual=(f'Add to ~/.codex/config.toml:\n  [mcp_servers.apw]\n  command = "{command}"\n  args = ["mcp", "run"]'),
         ),
     ]
 
@@ -103,9 +100,7 @@ def _install_into_json(client: Client) -> None:
         try:
             config = json.loads(path.read_text() or "{}")
         except json.JSONDecodeError as exc:
-            console.print(
-                f"[red]Error:[/red] could not parse {path} ({exc}); add this entry manually:"
-            )
+            console.print(f"[red]Error:[/red] could not parse {path} ({exc}); add this entry manually:")
             typer.echo(json.dumps({client.servers_key: {"apw": _entry(client)}}, indent=2))
             raise typer.Exit(1) from None
         shutil.copy2(path, path.with_name(path.name + ".bak"))
@@ -161,19 +156,13 @@ def mcp_install(
     clients = _clients()
     if client_key is None:
         if not sys.stdin.isatty():
-            console.print(
-                "[red]Error:[/red] no terminal to ask in; pass a client, "
-                "e.g. `apwcli mcp install cursor`"
-            )
+            console.print("[red]Error:[/red] no terminal to ask in; pass a client, e.g. `apwcli mcp install cursor`")
             raise typer.Exit(2)
         client = _pick_client(clients)
     else:
         match = next((c for c in clients if c.key == client_key.lower()), None)
         if match is None:
-            console.print(
-                f"[red]Error:[/red] unknown client {client_key!r}; "
-                f"one of: {', '.join(c.key for c in clients)}"
-            )
+            console.print(f"[red]Error:[/red] unknown client {client_key!r}; one of: {', '.join(c.key for c in clients)}")
             raise typer.Exit(2)
         client = match
 

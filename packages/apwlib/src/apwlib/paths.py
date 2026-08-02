@@ -23,9 +23,7 @@ PIN_STYLE_PATH = DATA_DIR / "pinwindow.css"  # optional user override for the PI
 
 # Apple's native-messaging manifest, installed by macOS for Chromium browsers. We copy it
 # into our managed browser profile so the loaded extension can reach the helper.
-APPLE_NATIVE_MANIFEST = Path(
-    "/Library/Google/Chrome/NativeMessagingHosts/com.apple.passwordmanager.json"
-)
+APPLE_NATIVE_MANIFEST = Path("/Library/Google/Chrome/NativeMessagingHosts/com.apple.passwordmanager.json")
 
 
 def cached_extension_version() -> str | None:

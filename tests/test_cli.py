@@ -143,9 +143,7 @@ def test_pw_get_clipboard_copies_without_printing(monkeypatch: pytest.MonkeyPatc
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
     copied: list[bytes] = []
     monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
-    monkeypatch.setattr(
-        "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
-    )
+    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input))
     result = runner.invoke(app, ["pw", "get", "github.com", "-c", "--clear-after", "0"])
     assert result.exit_code == 0
     assert copied == [b"hunter2"]
@@ -177,9 +175,7 @@ def test_clipboard_clear_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
     monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, **_k: None)
     scheduled: list = []
-    monkeypatch.setattr(
-        "apwcli.cli.common._schedule_clipboard_clear", lambda *a: scheduled.append(a)
-    )
+    monkeypatch.setattr("apwcli.cli.common._schedule_clipboard_clear", lambda *a: scheduled.append(a))
     result = runner.invoke(app, ["pw", "get", "github.com", "-c", "--clear-after", "0"])
     assert result.exit_code == 0
     assert scheduled == []
@@ -188,12 +184,8 @@ def test_clipboard_clear_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pw_generate_saves_and_shows(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        "apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw))
-    )
-    result = runner.invoke(
-        app, ["pw", "generate", "example.com", "me@example.com", "-n", "24", "--show"]
-    )
+    monkeypatch.setattr("apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw)))
+    result = runner.invoke(app, ["pw", "generate", "example.com", "me@example.com", "-n", "24", "--show"])
     assert result.exit_code == 0
     assert len(saved) == 1 and saved[0][:2] == ("example.com", "me@example.com")
     generated = saved[0][2]
@@ -203,9 +195,7 @@ def test_pw_generate_saves_and_shows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pw_generate_does_not_show_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list = []
-    monkeypatch.setattr(
-        "apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw))
-    )
+    monkeypatch.setattr("apwcli.cli.client.save_account", lambda u, user, pw: saved.append((u, user, pw)))
     result = runner.invoke(app, ["pw", "generate", "example.com", "me@example.com"])
     assert result.exit_code == 0
     assert saved[0][2] not in result.stdout  # saved, not printed
@@ -231,9 +221,7 @@ def test_otp_get_clipboard_copies_code(monkeypatch: pytest.MonkeyPatch) -> None:
     entries = [OTPEntry(username="me@example.com", domain="github.com", code="123456")]
     copied: list[bytes] = []
     monkeypatch.setattr("apwcli.cli.client.get_otp", lambda _url: entries)
-    monkeypatch.setattr(
-        "apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input)
-    )
+    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input))
     result = runner.invoke(app, ["otp", "get", "github.com", "-c", "--clear-after", "0"])
     assert result.exit_code == 0
     assert copied == [b"123456"]
@@ -251,9 +239,7 @@ def test_version_names_both_packages() -> None:
 
 def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        "apwcli.cli.client.save_account", lambda url, user, pw: saved.append((url, user, pw))
-    )
+    monkeypatch.setattr("apwcli.cli.client.save_account", lambda url, user, pw: saved.append((url, user, pw)))
     result = runner.invoke(app, ["pw", "save", "example.com", "me@example.com"], input="s3cret\n")
     assert result.exit_code == 0
     assert saved == [("example.com", "me@example.com", "s3cret")]

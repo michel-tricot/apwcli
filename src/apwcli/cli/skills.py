@@ -48,9 +48,7 @@ def skills_list() -> None:
 
 @skills_app.command("show")
 def skills_show(
-    name: Annotated[
-        str | None, typer.Argument(help="Skill name (optional when only one ships).")
-    ] = None,
+    name: Annotated[str | None, typer.Argument(help="Skill name (optional when only one ships).")] = None,
 ) -> None:
     """Print a skill's SKILL.md to stdout."""
     typer.echo((_resolve(name) / "SKILL.md").read_text(), nl=False)
@@ -58,14 +56,10 @@ def skills_show(
 
 @skills_app.command("install")
 def skills_install(
-    name: Annotated[
-        str | None, typer.Argument(help="Skill name (optional when only one ships).")
-    ] = None,
+    name: Annotated[str | None, typer.Argument(help="Skill name (optional when only one ships).")] = None,
     directory: Annotated[
         Path,
-        typer.Option(
-            "--dir", help="Skills directory to install into (e.g. a project's .claude/skills)."
-        ),
+        typer.Option("--dir", help="Skills directory to install into (e.g. a project's .claude/skills)."),
     ] = DEFAULT_SKILLS_DIR,
 ) -> None:
     """Install a skill into an agent's skills directory (overwrites an older copy)."""

@@ -53,9 +53,7 @@ def pw_get(
     username: str = typer.Argument("", help="Restrict to this username."),
     fmt: FormatOption = Format.table,
     show: bool = typer.Option(False, "--show", help="Reveal passwords in the table output."),
-    clipboard: bool = typer.Option(
-        False, "--clipboard", "-c", help="Copy the password to the clipboard, print nothing."
-    ),
+    clipboard: bool = typer.Option(False, "--clipboard", "-c", help="Copy the password to the clipboard, print nothing."),
     clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
 ) -> None:
     """Get password(s) for a URL."""
@@ -73,15 +71,11 @@ def pw_get(
 def pw_save(
     url: str,
     username: str,
-    stdin: bool = typer.Option(
-        False, "--stdin", help="Read the password from stdin (implied when piped)."
-    ),
+    stdin: bool = typer.Option(False, "--stdin", help="Read the password from stdin (implied when piped)."),
 ) -> None:
     """Create or update a password."""
-    if stdin or not sys.stdin.isatty():  # piped input can't answer a prompt
-        password = sys.stdin.read().strip()
-    else:
-        password = typer.prompt("Enter password", hide_input=True)
+    piped = stdin or not sys.stdin.isatty()  # piped input can't answer a prompt
+    password = sys.stdin.read().strip() if piped else typer.prompt("Enter password", hide_input=True)
     try:
         client.save_account(url, username, password)
     except ApwError as exc:
@@ -96,9 +90,7 @@ def pw_generate(
     length: int = typer.Option(20, "--length", "-n", min=8, help="Password length."),
     symbols: bool = typer.Option(True, "--symbols/--no-symbols", help="Include symbols."),
     show: bool = typer.Option(False, "--show", help="Print the generated password."),
-    clipboard: bool = typer.Option(
-        False, "--clipboard", "-c", help="Copy the password to the clipboard instead of saving it."
-    ),
+    clipboard: bool = typer.Option(False, "--clipboard", "-c", help="Copy the password to the clipboard instead of saving it."),
     clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
 ) -> None:
     """Generate a strong password, save it, and (optionally) reveal or copy it."""

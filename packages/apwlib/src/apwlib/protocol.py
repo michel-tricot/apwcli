@@ -138,7 +138,5 @@ def entries_from(data: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(data.get("Entries"), list):
         return data["Entries"]
     keyed = [(k, v) for k, v in data.items() if k.startswith("Entry_")]
-    keyed.sort(
-        key=lambda kv: int(kv[0].split("_", 1)[1]) if kv[0].split("_", 1)[1].isdigit() else 0
-    )
+    keyed.sort(key=lambda kv: int(kv[0].split("_", 1)[1]) if kv[0].split("_", 1)[1].isdigit() else 0)
     return [v for _, v in keyed]

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import enum
+import faulthandler
 import json
+import signal
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -20,6 +23,12 @@ from rich.table import Table
 from apwcli import __version__
 
 console = Console()
+
+# Escape hatch for a hung command: `kill -USR1 <pid>` dumps every thread's stack
+# to stderr, so "it's stuck" becomes "it's stuck HERE". No-op on platforms
+# without SIGUSR1 or in embedded interpreters that reject the handler.
+with contextlib.suppress(AttributeError, ValueError, OSError):
+    faulthandler.register(signal.SIGUSR1)
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="🔑 A CLI for Apple Passwords.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Manage the background daemon and pairing.")
@@ -44,9 +53,7 @@ def _print_version(value: bool) -> None:
 def _root(
     _version: Annotated[
         bool,
-        typer.Option(
-            "--version", callback=_print_version, is_eager=True, help="Print the version and exit."
-        ),
+        typer.Option("--version", callback=_print_version, is_eager=True, help="Print the version and exit."),
     ] = False,
 ) -> None:
     # One platform gate for the whole CLI: every command needs the macOS-only Apple
@@ -60,6 +67,7 @@ def _prompt_pin() -> str:
         return typer.prompt("Enter the PIN shown by macOS")
     from apwlib.pinwindow import request_pin  # no TTY: collect the PIN in a small window
 
+    status_line("opening a PIN window — enter the code macOS is showing")
     return request_pin()
 
 

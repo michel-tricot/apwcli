@@ -9,7 +9,7 @@ process (``python -m apwlib.daemon``) and talks to it over the socket.
 # here for compatibility.
 from apwlib.browsers import (
     BROWSERS,
-    Browser,
+    BrowserInfo,
     installed_browsers,
     resolve_browser,
 )
@@ -17,7 +17,7 @@ from apwlib.daemon.server import run
 
 __all__ = [
     "BROWSERS",
-    "Browser",
+    "BrowserInfo",
     "installed_browsers",
     "resolve_browser",
     "run",

@@ -22,9 +22,7 @@ from apwcli.cli.common import (
 def otp_get(
     url: str,
     fmt: FormatOption = Format.table,
-    clipboard: bool = typer.Option(
-        False, "--clipboard", "-c", help="Copy the code to the clipboard, print nothing."
-    ),
+    clipboard: bool = typer.Option(False, "--clipboard", "-c", help="Copy the code to the clipboard, print nothing."),
     clear_after: ClearAfterOption = CLIPBOARD_CLEAR_SECONDS,
 ) -> None:
     """Get a one-time code for a URL."""
