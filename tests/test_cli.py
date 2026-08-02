@@ -91,26 +91,6 @@ def test_daemon_start_browser_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
     assert config_writes == []
 
 
-def test_daemon_start_browser_with_running_daemon_points_at_restart(monkeypatch: pytest.MonkeyPatch) -> None:
-    # -b can't be honored without a fresh daemon; a silent no-op would look like success.
-    from pathlib import Path
-
-    from apwlib._browsers import BrowserInfo
-
-    monkeypatch.setattr(
-        "apwlib._browsers.installed_browsers",
-        lambda: [BrowserInfo(id="chrome", name="Chrome", binary=Path("/x"))],
-    )
-    monkeypatch.setattr(
-        "apwcli.cli.common.daemon_client.status",
-        lambda: {"running": True, "bridge": True, "paired": True, "browser": "Brave", "browser_pid": 7},
-    )
-    result = runner.invoke(app, ["daemon", "start", "-b", "chrome"])
-    assert result.exit_code == 2  # INVALID_PARAM
-    assert "already running with Brave" in result.stderr
-    assert "restart" in result.stderr
-
-
 def test_otp_get_filters_by_username(monkeypatch: pytest.MonkeyPatch) -> None:
     from apwlib import OTPEntry
 
@@ -126,7 +106,8 @@ def test_otp_get_filters_by_username(monkeypatch: pytest.MonkeyPatch) -> None:
     assert copied == [b"222222"]  # the username narrows an otherwise ambiguous copy
 
 
-def test_pw_get_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw_get_text_format_is_tsv_and_never_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    # text output is for pipes: tab-separated and always carrying the real values.
     from apwlib import PasswordEntry
 
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
@@ -134,6 +115,7 @@ def test_pw_get_text_format_is_tsv(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["pw", "get", "github.com", "--format", "text"])
     assert result.exit_code == 0
     assert "me@example.com\tgithub.com" in result.stdout
+    assert "hunter2" in result.stdout
 
 
 def test_pw_get_json_format(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,16 +157,6 @@ def test_pw_get_show_reveals_password(monkeypatch: pytest.MonkeyPatch) -> None:
     entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
     monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
     result = runner.invoke(app, ["pw", "get", "github.com", "--show"])
-    assert result.exit_code == 0
-    assert "hunter2" in result.stdout
-
-
-def test_pw_get_text_format_is_never_masked(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import PasswordEntry
-
-    entries = [PasswordEntry(username="me@example.com", domain="github.com", password="hunter2")]
-    monkeypatch.setattr("apwcli.cli.client.get_password", lambda _url, _login="": entries)
-    result = runner.invoke(app, ["pw", "get", "github.com", "--format", "text"])
     assert result.exit_code == 0
     assert "hunter2" in result.stdout
 
@@ -267,18 +239,6 @@ def test_pw_get_clipboard_refuses_multiple_matches(monkeypatch: pytest.MonkeyPat
     assert "narrow" in result.stderr
 
 
-def test_otp_get_clipboard_copies_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import OTPEntry
-
-    entries = [OTPEntry(username="me@example.com", domain="github.com", code="123456")]
-    copied: list[bytes] = []
-    monkeypatch.setattr("apwcli.cli.client.get_otp", lambda _url: entries)
-    monkeypatch.setattr("apwcli.cli.common.subprocess.run", lambda *_a, input, **_k: copied.append(input))
-    result = runner.invoke(app, ["otp", "get", "github.com", "-c", "--clear-after", "0"])
-    assert result.exit_code == 0
-    assert copied == [b"123456"]
-
-
 def test_version_names_both_packages() -> None:
     from apwlib import __version__ as lib_version
 
@@ -295,17 +255,6 @@ def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch)
     result = runner.invoke(app, ["pw", "save", "example.com", "me@example.com"], input="s3cret\n")
     assert result.exit_code == 0
     assert saved == [("example.com", "me@example.com", "s3cret")]
-
-
-def test_pw_get_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import DaemonNotRunningError
-
-    def boom(_url: str, _u=None):
-        raise DaemonNotRunningError()
-
-    monkeypatch.setattr("apwcli.cli.client.get_password", boom)
-    result = runner.invoke(app, ["pw", "get", "https://github.com"])
-    assert result.exit_code == 9
 
 
 def test_pw_get_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:

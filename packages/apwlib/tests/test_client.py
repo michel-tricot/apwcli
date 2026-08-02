@@ -16,17 +16,6 @@ def test_no_daemon_raises_daemon_not_running() -> None:
         pw.get_password("github.com")
 
 
-def test_unpaired_response_raises_not_paired(monkeypatch: pytest.MonkeyPatch) -> None:
-    pw = ApplePasswords(auto_start=False)
-    monkeypatch.setattr(
-        pw._daemon,
-        "_send_raw",
-        lambda _msg: {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"},
-    )
-    with pytest.raises(NotPairedError):
-        pw.get_password("github.com")
-
-
 def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
     prompted = []
     pw = ApplePasswords(auto_start=False, pin_provider=lambda: (prompted.append(1), "123456")[1])

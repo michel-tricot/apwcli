@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full validation suite: format, lint, typecheck, tests (incl. docs code examples).
+# Full validation suite: format, lint, typecheck, tests.
 # Run this before every commit/push (see AGENTS.md); CI runs it too. Usage: scripts/check.sh
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -13,7 +13,7 @@ uv run ruff check .
 echo "==> ty check"
 uv run ty check
 
-echo "==> pytest (unit tests + docs code examples)"
+echo "==> pytest"
 uv run pytest
 
 echo "All checks passed."

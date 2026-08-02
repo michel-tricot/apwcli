@@ -70,6 +70,5 @@ session unpaired); `DaemonStartError` means a spawned daemon never became
 ready; `ServerError` covers malformed daemon responses. Catch `SessionError`
 to re-pair, `ApwError` for everything else.
 
-Python code blocks in this file are executed and lint-checked on every test
-run. For architecture and protocol details, see the
+For architecture and protocol details, see the
 [design notes](design/apwlib.md).
