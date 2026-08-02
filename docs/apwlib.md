@@ -27,8 +27,8 @@ pw.get_otp("github.com")  # the current code(s) -> list[OTPEntry]
 
 Reads are keyed to a URL and matched by registrable domain; an empty list
 means no results. `pw.daemon` gives explicit control: `start()`, `stop()`,
-`status()`, and the pairing primitives `request_challenge()`,
-`verify_challenge(pin)`, `wait_until_paired()`.
+`status()`, and the pairing primitives `request_challenge()` and
+`verify_challenge(pin)` (blocks until pairing settles; True once paired).
 
 Constructor options: `pin_provider` (callable returning the PIN; without it an
 unpaired call raises `NotPairedError`), `auto_start=False` (require an

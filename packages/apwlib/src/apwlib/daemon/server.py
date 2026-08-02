@@ -21,6 +21,7 @@ import json
 import os
 import shutil
 import signal
+import time
 from pathlib import Path
 
 from chauffeur import Browser, ExtensionNotFoundError, JSError, LaunchSpec, wipe_profile
@@ -29,9 +30,12 @@ from apwlib.browsers import BrowserInfo, profile_for
 from apwlib.daemon.extension import extension_spec
 from apwlib.errors import ApwError
 from apwlib.paths import APPLE_NATIVE_MANIFEST, LOCK_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import WIRE_NO_BRIDGE, Status
+from apwlib.protocol import WIRE_NO_BRIDGE, Command, Status
 
 REQUEST_TIMEOUT = 30.0
+CHALLENGE_TIMEOUT = 10.0  # challenge -> MSG1Set (the native round trip the PIN must wait for)
+PAIR_TIMEOUT = 20.0  # SRP round trip after the PIN is submitted
+_PAIR_POLL = 0.1
 
 
 class ExtensionBridge:
@@ -79,6 +83,52 @@ class ExtensionBridge:
             except LookupError:  # worker detached between the ready check and the call
                 return {"status": Status.INVALID_SESSION, "error": WIRE_NO_BRIDGE}
 
+    # -- pairing ---------------------------------------------------------------
+    # The daemon owns the waits around the handshake: it watches the worker's state
+    # directly, so clients get one blocking op per step instead of polling `status`
+    # over the socket and knowing the state machine's vocabulary.
+
+    async def pair_challenge(self, timeout: float = CHALLENGE_TIMEOUT) -> dict:  # noqa: ASYNC109 - a poll deadline, not a cancellation
+        """Start a pairing handshake and wait until it is ready for the PIN.
+
+        ``ChallengePIN`` kicks off an async native round trip; a PIN submitted before it
+        settles at ``MSG1Set`` wedges the handshake (it never completes and never
+        collapses). So this replies only once the state is ``MSG1Set`` — or with
+        ``ready: False`` on timeout, and the caller proceeds anyway so a divergent
+        state machine can't hang pairing here.
+        """
+        response = await self.request({"cmd": int(Command.HANDSHAKE)})
+        if "error" in response:
+            return response
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if (await self.pairing())["state"] == "MSG1Set":
+                return {"ready": True}
+            await asyncio.sleep(_PAIR_POLL)
+        return {"ready": False}
+
+    async def pair_verify(self, pin: str, timeout: float = PAIR_TIMEOUT) -> dict:  # noqa: ASYNC109 - a poll deadline, not a cancellation
+        """Submit the PIN and wait for pairing to settle; replies ``{"paired": bool}``.
+
+        Called with a handshake in flight (``pair_challenge`` drove the state to
+        ``MSG1Set``), so a return to ``NotInSession`` can only mean the helper rejected
+        the PIN — report that at once rather than polling to ``timeout``. A correct PIN
+        advances ``MSG1Set`` -> ``SessionKeySet`` without ever passing through
+        ``NotInSession``, so this never trips on the success path.
+        """
+        response = await self.request({"cmd": int(Command.HANDSHAKE), "pin": pin})
+        if "error" in response:
+            return response
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            pairing = await self.pairing()
+            if pairing["paired"]:
+                return {"paired": True}
+            if pairing["state"] == "NotInSession":
+                return {"paired": False}  # collapsed back to idle — the PIN was rejected
+            await asyncio.sleep(_PAIR_POLL)
+        return {"paired": False}
+
 
 async def _handle_client(
     reader: asyncio.StreamReader,
@@ -112,6 +162,10 @@ async def _handle_client(
         elif message.get("op") == "stop":
             response = {"stopping": True}
             stop.set()
+        elif message.get("op") == "pair_challenge":
+            response = await bridge.pair_challenge()
+        elif message.get("op") == "pair_verify":
+            response = await bridge.pair_verify(str(message.get("pin", "")))
         else:
             response = await bridge.request(message)
         writer.write((json.dumps(response) + "\n").encode())

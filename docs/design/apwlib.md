@@ -204,9 +204,9 @@ Callers never manage the daemon. A facade call that finds none spawns
 caller and survives closing the terminal, waits for the bridge, then retries.
 The daemon takes an exclusive `flock` on `~/.apwlib/daemon.lock` first, so
 concurrent auto-starts are race-safe (losers exit before touching the
-socket/profile). A small control channel (`{"op":"status"}` / `{"op":"stop"}`)
-reports readiness/pairing and requests shutdown without involving the
-extension.
+socket/profile). A small control channel (`{"op":"status"}` / `{"op":"stop"}` /
+`{"op":"pair_challenge"}` / `{"op":"pair_verify"}`) reports readiness/pairing,
+requests shutdown, and drives the pairing handshake.
 
 Because a pairing can't be persisted (Part 1), the model is: pair once per
 daemon lifetime, keep the daemon (hence the browser and its in-memory session)
@@ -230,8 +230,16 @@ command) work.
 
 The facade takes an optional `pin_provider`. On an `unpaired` response it pairs
 transparently — triggers the challenge (macOS shows the PIN), calls
-`pin_provider()`, waits until paired, and retries the request. Without a
-provider, an unpaired call raises `NotPairedError`.
+`pin_provider()`, verifies, and retries the request. Without a provider, an
+unpaired call raises `NotPairedError`.
+
+The daemon owns the waits around the handshake: `pair_challenge` replies only
+once the worker's state settles at `MSG1Set` (a PIN submitted earlier wedges
+the handshake), and `pair_verify` replies once the attempt settles — paired,
+rejected (the state collapses back to `NotInSession`, reported at once), or
+timed out. The daemon watches the worker's state directly, so clients get one
+blocking op per step instead of polling `status` over the socket and knowing
+the state machine's vocabulary.
 
 For callers without a terminal, `apwlib.pinwindow.request_pin` is a bundled
 `pin_provider` that pops a dialog-sized PIN window: chauffeur opens the

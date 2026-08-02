@@ -113,8 +113,7 @@ def daemon_pair(
         status_line("pairing code requested — macOS is displaying it")
         code = pin or _prompt_pin()
         status_line("verifying")
-        client.daemon.verify_challenge(code)
-        paired = client.daemon.wait_until_paired()
+        paired = client.daemon.verify_challenge(code)
     except ApwError as exc:
         fail(exc)
     if not paired:

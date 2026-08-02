@@ -33,14 +33,11 @@ def test_autopair_on_unpaired(monkeypatch: pytest.MonkeyPatch) -> None:
     state = {"paired": False}
 
     def fake_send_raw(msg):
-        if msg.get("op") == "status":  # polled by _wait_challenge_ready and wait_until_paired
-            # MSG1Set = challenge settled and ready for the PIN; paired once verified.
-            pairing_state = "SessionKeySet" if state["paired"] else "MSG1Set"
-            return {"running": True, "bridge": True, "paired": state["paired"], "pairing_state": pairing_state}
-        if msg.get("cmd") == 2:  # handshake (challenge or verify)
-            if msg.get("pin") is not None:
-                state["paired"] = True
-            return {"id": "1", "status": int(Status.SUCCESS)}
+        if msg.get("op") == "pair_challenge":
+            return {"ready": True}
+        if msg.get("op") == "pair_verify":
+            state["paired"] = msg.get("pin") == "123456"
+            return {"paired": state["paired"]}
         if not state["paired"]:
             return {"id": "1", "status": int(Status.INVALID_SESSION), "error": "unpaired"}
         return {
@@ -184,62 +181,28 @@ def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp
     assert daemon._singleton_free() is True  # freed again
 
 
-def test_wait_until_paired_fails_fast_on_collapsed_handshake(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A handshake in progress (MSG1Set) that falls back to NotInSession means the PIN was
-    # rejected — return False at once, not after the full timeout.
+def test_verify_challenge_returns_the_daemon_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The daemon owns the pairing waits; verify_challenge is one blocking op whose
+    # reply carries the outcome.
     daemon = ApplePasswords(auto_start=False).daemon
-    responses = iter(
-        [
-            {"paired": False, "pairing_state": "MSG1Set"},
-            {"paired": False, "pairing_state": "NotInSession"},
-        ]
-    )
-    monkeypatch.setattr(daemon, "_send_raw", lambda _m: next(responses))
-    assert daemon.wait_until_paired(timeout=10) is False
+    sent: list[dict] = []
+    monkeypatch.setattr(daemon, "_send_raw", lambda m: sent.append(m) or {"paired": False})
+    assert daemon.verify_challenge("123456") is False
+    assert sent == [{"op": "pair_verify", "pin": "123456"}]
 
-
-def test_verify_challenge_waits_for_the_handshake_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Submitting the PIN before the challenge reaches MSG1Set wedges the handshake. verify
-    # must poll until MSG1Set, then send the PIN — never the other way round.
-    daemon = ApplePasswords(auto_start=False).daemon
-    states = iter(["NotInSession", "NotInSession", "MSG1Set"])
-    events: list[str] = []
-
-    def fake_send_raw(msg: dict) -> dict:
-        if msg.get("op") == "status":
-            state = next(states)
-            events.append(f"poll:{state}")
-            return {"pairing_state": state}
-        events.append(f"pin:{msg.get('pin')}")
-        return {"status": int(Status.SUCCESS)}
-
-    monkeypatch.setattr(daemon, "_send_raw", fake_send_raw)
-    daemon.verify_challenge("123456")
-    assert events == ["poll:NotInSession", "poll:NotInSession", "poll:MSG1Set", "pin:123456"]
-
-
-def test_wait_until_paired_fails_fast_when_collapse_beats_first_poll(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The bug behind the ~22s "hang": a wrong PIN collapses MSG1Set -> NotInSession faster
-    # than the first status poll, so the very first read is already NotInSession. Since
-    # wait_until_paired is only called with a handshake in flight, that is a rejection and
-    # must fail immediately — the old saw_pending gate polled the full timeout instead.
-    daemon = ApplePasswords(auto_start=False).daemon
-    polls = {"n": 0}
-
-    def fake_send_raw(_m: dict) -> dict:
-        polls["n"] += 1
-        return {"paired": False, "pairing_state": "NotInSession"}
-
-    monkeypatch.setattr(daemon, "_send_raw", fake_send_raw)
-    assert daemon.wait_until_paired(timeout=10) is False
-    assert polls["n"] == 1  # decided on the first read, no timeout loop
-
-
-def test_wait_until_paired_true_when_paired(monkeypatch: pytest.MonkeyPatch) -> None:
-    daemon = ApplePasswords(auto_start=False).daemon
     monkeypatch.setattr(daemon, "_send_raw", lambda _m: {"paired": True})
-    assert daemon.wait_until_paired(timeout=1) is True
+    assert daemon.verify_challenge("123456") is True
+
+
+def test_pairing_ops_raise_on_daemon_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A pairing step that fails outright (e.g. no extension connected) must raise the
+    # mapped error, not read as a rejected PIN.
+    from apwlib import SessionError
+
+    daemon = ApplePasswords(auto_start=False).daemon
+    error = {"status": int(Status.INVALID_SESSION), "error": "no extension connected"}
+    monkeypatch.setattr(daemon, "_send_raw", lambda _m: error)
+    with pytest.raises(SessionError):
+        daemon.request_challenge()
+    with pytest.raises(SessionError):
+        daemon.verify_challenge("123456")

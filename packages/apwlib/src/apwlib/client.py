@@ -22,7 +22,7 @@ from apwlib.errors import (
 )
 from apwlib.models import OTPEntry, PasswordEntry
 from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import WIRE_UNPAIRED, Command, Status
+from apwlib.protocol import WIRE_UNPAIRED, Status
 
 
 class DaemonStatus(TypedDict):
@@ -36,10 +36,8 @@ class DaemonStatus(TypedDict):
     pairing_state: str | None
 
 
-_TIMEOUT = 35.0
+_TIMEOUT = 35.0  # above the daemon's own waits (30s bridge requests, 20s pairing)
 _START_TIMEOUT = 45.0  # browser launch + extension load + bridge connect
-_CHALLENGE_TIMEOUT = 10.0  # challenge -> MSG1Set (the native round-trip the PIN must wait for)
-_PAIR_TIMEOUT = 20.0  # SRP round-trip after the PIN is entered
 _LOG_MAX_BYTES = 1_000_000  # rotate the daemon log once it grows past ~1 MB
 
 
@@ -235,65 +233,29 @@ class _Daemon:
         }
 
     # -- pairing primitives ----------------------------------------------------
+    # The daemon owns the waits around the handshake (see daemon/server.py); each
+    # step here is one blocking request that returns when the step has settled.
+
     def request_challenge(self) -> None:
-        """Ask the extension to display the macOS pairing PIN."""
-        self.deliver({"cmd": Command.HANDSHAKE})
+        """Ask the extension to display the macOS pairing PIN.
 
-    def _wait_challenge_ready(self, timeout: float = _CHALLENGE_TIMEOUT) -> bool:
-        """Block until the challenge handshake is ready for the PIN (reaches ``MSG1Set``).
-
-        ``request_challenge`` kicks off an async native round-trip. Submitting the PIN
-        before it settles wedges the handshake at ``MSG1Set`` — it never completes and never
-        collapses, so pairing then burns the full ``wait_until_paired`` timeout. A human
-        typing the PIN off the macOS dialog leaves ample time; this closes the same gap for
-        programmatic callers that verify with no delay. Returns ``False`` on timeout, and the
-        caller proceeds anyway so a divergent state machine can't hang here.
+        Returns once the handshake is ready for the PIN, so :meth:`verify_challenge`
+        can be called immediately. Raises if the daemon/extension can't pair at all.
         """
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                state = self._send_raw({"op": "status"}).get("pairing_state")
-            except SessionError:
-                return False
-            if state == "MSG1Set":
-                return True
-            time.sleep(0.1)
-        return False
+        response = self.deliver({"op": "pair_challenge"})
+        if _error(response):
+            raise error_for(response.get("status", Status.SERVER_ERROR), response.get("error"))
 
-    def verify_challenge(self, pin: str) -> None:
-        """Submit the PIN. Pairing completes asynchronously — see :meth:`wait_until_paired`.
+    def verify_challenge(self, pin: str) -> bool:
+        """Submit the PIN and block until pairing settles; True once paired.
 
-        Waits for the challenge to settle first (see :meth:`_wait_challenge_ready`), so a
-        PIN submitted immediately after :meth:`request_challenge` can't wedge the handshake.
+        False means the helper rejected the PIN (reported the moment the handshake
+        collapses) or the attempt timed out daemon-side.
         """
-        self._wait_challenge_ready()
-        self.deliver({"cmd": Command.HANDSHAKE, "pin": pin})
-
-    def wait_until_paired(self, timeout: float = _PAIR_TIMEOUT) -> bool:
-        """Block until the daemon reports a paired session, or the attempt fails/times out.
-
-        Call it only after :meth:`verify_challenge`: a handshake is then already in flight
-        (the challenge drove the state to ``MSG1Set``), so a return to ``NotInSession`` can
-        only mean the helper rejected the PIN. Report that at once rather than polling to
-        ``timeout``. A correct PIN advances ``MSG1Set`` -> ``SessionKeySet`` without ever
-        passing through ``NotInSession``, so this never trips on the success path.
-
-        Not gated on first observing ``MSG1Set``: a wrong PIN collapses in well under the
-        poll interval, so the pending state is routinely gone before the first read — the
-        old gate then mistook the collapse for "not started yet" and waited the full timeout.
-        """
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                resp = self._send_raw({"op": "status"})
-            except SessionError:  # daemon gone (or lost mid-poll) — pairing can't complete
-                return False
-            if resp.get("paired"):
-                return True
-            if resp.get("pairing_state") == "NotInSession":
-                return False  # collapsed back to idle — the PIN was rejected
-            time.sleep(0.2)
-        return False
+        response = self.deliver({"op": "pair_verify", "pin": str(pin)})
+        if _error(response):
+            raise error_for(response.get("status", Status.SERVER_ERROR), response.get("error"))
+        return bool(response.get("paired"))
 
 
 class ApplePasswords:
@@ -322,7 +284,7 @@ class ApplePasswords:
         """Deliver a message, auto-pairing on an unpaired session when possible."""
         response = self.daemon.deliver(message)
         if _error(response) == WIRE_UNPAIRED:
-            if self._pin_provider and message.get("cmd") != Command.HANDSHAKE:
+            if self._pin_provider:
                 self._pair()
                 response = self.daemon.deliver(message)  # retry once after pairing
             if _error(response) == WIRE_UNPAIRED:
@@ -330,12 +292,11 @@ class ApplePasswords:
         return response
 
     def _pair(self) -> None:
-        """Pop the PIN dialog, collect the PIN, verify, and wait for pairing to complete."""
+        """Pop the PIN dialog, collect the PIN, and verify (blocks until settled)."""
         if not self._pin_provider:
             return
         self.daemon.request_challenge()
         self.daemon.verify_challenge(str(self._pin_provider()))
-        self.daemon.wait_until_paired()
 
     def _payload(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         response = self._send(message)

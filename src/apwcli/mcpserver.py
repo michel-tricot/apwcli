@@ -46,8 +46,7 @@ def build_server(allow_passwords: bool = False) -> FastMCP:
     @server.tool
     def submit_pin(pin: str) -> dict[str, bool]:
         """Complete pairing with the PIN the user read from the macOS dialog."""
-        client.daemon.verify_challenge(pin)
-        return {"paired": client.daemon.wait_until_paired()}
+        return {"paired": client.daemon.verify_challenge(pin)}
 
     @server.tool
     def list_accounts(url: str) -> list[dict[str, Any]]:

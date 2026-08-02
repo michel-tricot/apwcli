@@ -72,8 +72,7 @@ from apwlib import ApplePasswords
 
 pw = ApplePasswords()
 pw.daemon.request_challenge()  # macOS shows a 6-digit PIN
-pw.daemon.verify_challenge(input("PIN: "))
-pw.daemon.wait_until_paired()
+paired = pw.daemon.verify_challenge(input("PIN: "))  # blocks until settled
 ```
 
 `pw.daemon` also exposes `start()`, `stop()`, and `status()`. A pairing cannot
