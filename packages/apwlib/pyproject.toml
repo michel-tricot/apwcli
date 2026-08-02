@@ -1,6 +1,6 @@
 [project]
 name = "apwlib"
-version = "0.1.0"
+version = "0.1.1"
 description = "Programmatic access to Apple Passwords (iCloud Keychain) on macOS."
 readme = "README.md"
 license = "MIT"
