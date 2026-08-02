@@ -1,7 +1,7 @@
 """Structured health checks over the whole chain: browser → helper → daemon → pairing.
 
-:func:`run_checks` is what backs ``apwcli doctor``; it returns data, not text, so any
-consumer (CLI, MCP, a script) can render or act on it. A check with ``required=True``
+`run_checks` is what backs `apwcli doctor`; it returns data, not text, so any
+consumer (CLI, MCP, a script) can render or act on it. A check with `required=True`
 is a prerequisite: apwlib cannot work at all while it fails. Non-required checks are
 informational (e.g. the daemon being stopped just means the next command auto-starts it).
 """
@@ -17,7 +17,7 @@ from apwlib._paths import APPLE_NATIVE_MANIFEST, cached_extension_version
 
 @dataclass(frozen=True)
 class Check:
-    """One diagnostic result. ``hint`` says how to fix it (empty when ok)."""
+    """One diagnostic result. `hint` says how to fix it (empty when ok)."""
 
     key: str
     ok: bool

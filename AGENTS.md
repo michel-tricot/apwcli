@@ -53,6 +53,22 @@ push and pull request, so anything skipped locally will fail there.
 - Markdown files are excluded from ruff on purpose: doc code blocks use the
   `#> ...` expected-output convention, which ruff's markdown formatter mangles.
 
+## Documentation site
+
+`mkdocs.yml` builds a Material for MkDocs site from `docs/` (Home, CLI
+reference, library guide, mkdocstrings API reference, design notes). It is
+deployed to GitHub Pages by `.github/workflows/docs.yml` on every push to
+main. Build it locally with:
+
+```console
+$ uv sync --group docs
+$ uv run mkdocs build --strict   # or: mkdocs serve
+```
+
+`--strict` fails on broken links; keep it passing. The API reference is
+generated from docstrings — keep docstrings in plain Markdown (backtick code
+spans, no reST roles), since mkdocstrings renders them verbatim.
+
 ## Common commands
 
 ```console

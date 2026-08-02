@@ -1,0 +1,69 @@
+site_name: apwcli
+site_description: Apple Passwords (iCloud Keychain) from the terminal and from Python.
+site_url: https://michel-tricot.github.io/apwcli/
+repo_url: https://github.com/michel-tricot/apwcli
+repo_name: michel-tricot/apwcli
+copyright: MIT &copy; Michel Tricot
+
+theme:
+  name: material
+  icon:
+    logo: material/key-variant
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - CLI reference: apwcli.md
+  - Library guide: apwlib.md
+  - API reference: reference.md
+  - How it works: design/apwlib.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            docstring_section_style: table
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details

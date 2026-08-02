@@ -29,6 +29,7 @@ dev = [
     "ruff>=0.12",
     "ty",
 ]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]
 
 [tool.ruff]
 line-length = 150

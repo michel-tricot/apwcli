@@ -3,16 +3,16 @@
 The PIN macOS displays must be typed by a human, but callers often run without a
 TTY (agents, GUI apps, scripts). Whoever can read the macOS PIN dialog is at the
 screen, so instead of a terminal prompt we pop a dialog-sized chromeless window
-(an approved browser in ``--app`` mode, driven by chauffeur) showing six code
-boxes. The page posts the PIN back over chauffeur's ``py_chauffeur`` channel (or an
-empty PIN when it is closed unanswered), and :func:`request_pin` returns it — a
-drop-in ``pin_provider`` for the facade::
+(an approved browser in `--app` mode, driven by chauffeur) showing six code
+boxes. The page posts the PIN back over chauffeur's `py_chauffeur` channel (or an
+empty PIN when it is closed unanswered), and `request_pin` returns it — a
+drop-in `pin_provider` for the facade::
 
     pw = ApplePasswords(pin_provider=request_pin)
 
-The page is ``page.html`` next to this module; its look comes from a
-stylesheet resolved in order: the ``css`` argument, a user override at
-``~/.apwlib/pinwindow.css``, then the bundled ``default.css``.
+The page is `page.html` next to this module; its look comes from a
+stylesheet resolved in order: the `css` argument, a user override at
+`~/.apwlib/pinwindow.css`, then the bundled `default.css`.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def _page() -> str:
 
 
 def _style(css: str | None) -> str:
-    """The stylesheet to serve: explicit ``css``, the user override file, or the default."""
+    """The stylesheet to serve: explicit `css`, the user override file, or the default."""
     if css is not None:
         return css
     if PIN_STYLE_PATH.exists():
@@ -48,7 +48,7 @@ def _style(css: str | None) -> str:
 
 
 def _window_spec(browser: BrowserInfo, workdir: Path) -> LaunchSpec:
-    """A chromeless, dialog-sized app window serving the PIN page from ``workdir``."""
+    """A chromeless, dialog-sized app window serving the PIN page from `workdir`."""
     return LaunchSpec(
         profile=workdir / "profile",
         browser=browser.binary,
@@ -61,10 +61,10 @@ def _window_spec(browser: BrowserInfo, workdir: Path) -> LaunchSpec:
 def request_pin(timeout: float = _TIMEOUT, css: str | None = None) -> str:
     """Pop the PIN window and return the six digits the user typed.
 
-    ``css`` replaces the window's stylesheet (falling back to
-    ``~/.apwlib/pinwindow.css``, then the bundled default). Raises
-    ``NotPairedError`` when no supported browser is installed, the window is
-    closed without a code, or nobody answers within ``timeout``.
+    `css` replaces the window's stylesheet (falling back to
+    `~/.apwlib/pinwindow.css`, then the bundled default). Raises
+    `NotPairedError` when no supported browser is installed, the window is
+    closed without a code, or nobody answers within `timeout`.
     """
     browser = resolve_browser(read_config().get("browser"))
     if browser is None:
