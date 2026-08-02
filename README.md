@@ -7,9 +7,10 @@ Read passwords and one-time codes, save logins, script it all.
 
 [![CI](https://github.com/michel-tricot/apwcli/actions/workflows/ci.yml/badge.svg)](https://github.com/michel-tricot/apwcli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#)
 
+[**Website**](https://michel-tricot.github.io/apwcli/) ·
 [Commands](docs/apwcli.md) ·
 [Python library](packages/apwlib) ·
 [Examples](examples) ·
@@ -20,7 +21,7 @@ Read passwords and one-time codes, save logins, script it all.
 ---
 
 - **Passwords & one-time codes** — read, save, and update Apple Passwords entries
-- **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
+- ✨ **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
 - **Safe by default** — passwords are masked on screen; `-c` copies to the clipboard instead
 - **Scriptable** — JSON/TSV output everywhere; Python API via [`apwlib`](packages/apwlib)
 - **Zero setup** — a background daemon auto-starts on first use and pairs on demand
@@ -67,9 +68,9 @@ This is a tool for your passwords, so here's exactly what it does with them:
   `-c` copies to the clipboard instead of printing, and the clipboard is
   auto-cleared after 20s (`--clear-after`).
 - **Agents never see plaintext passwords by default.** The MCP server exposes
-  account listings, one-time codes, saving, and pairing — but not password
-  reads unless you explicitly run it with `--allow-passwords` (MCP results
-  travel to the model provider).
+  one-time codes, saving, and pairing — but not password reads unless you
+  explicitly run it with `--allow-passwords` (MCP results travel to the model
+  provider).
 - **Nothing sensitive is logged.** The daemon log records lifecycle and errors
   only; command bodies are encrypted inside the browser and never written in
   plaintext.
@@ -146,7 +147,7 @@ apwcli skills install          # install the Claude skill into ~/.claude/skills
 apwcli mcp install             # wire the MCP server into Claude, Cursor, VS Code, …
 ```
 
-The MCP server exposes account listings, one-time codes, saving, and pairing —
+The MCP server exposes one-time codes, saving, and pairing —
 **never plaintext passwords** unless you start it with
 `apwcli mcp run --allow-passwords` (MCP tool results travel to the model
 provider; see the [design notes](docs/design/apwlib.md)).
@@ -160,17 +161,43 @@ from apwlib import ApplePasswords
 
 pw = ApplePasswords(pin_provider=lambda: input("PIN: "))
 for entry in pw.get_password("github.com", "me@example.com"):
-    print(entry.username, entry.password)
+    login(entry.username, entry.password)  # typed entries; nothing printed
 ```
 
-## Development
+Full guide and API reference on the
+[website](https://michel-tricot.github.io/apwcli/); runnable scripts in
+[`examples/`](examples).
 
-This repository is a uv workspace with two packages: `apwcli` (this project,
-`src/apwcli`) and [`apwlib`](packages/apwlib). Before committing, run the full
-validation suite — format, lint, typecheck, tests:
+## Contributing
+
+Contributions are welcome. The repository is a
+[uv](https://docs.astral.sh/uv/) workspace with two packages: `apwcli` (this
+project, `src/apwcli`) and [`apwlib`](packages/apwlib). Set up a checkout:
+
+```sh
+git clone https://github.com/michel-tricot/apwcli
+cd apwcli
+uv sync
+```
+
+Before committing, run the full validation suite — format, lint, typecheck,
+tests — and keep it green; CI runs the same thing:
 
 ```sh
 scripts/check.sh
 ```
 
-Contributor and agent guidelines live in [AGENTS.md](AGENTS.md).
+Work on the documentation site (MkDocs Material):
+
+```sh
+uv sync --group docs
+uv run mkdocs serve      # live preview at http://127.0.0.1:8000
+```
+
+Contributor and agent guidelines live in [AGENTS.md](AGENTS.md); design notes
+in [docs/design/apwlib.md](docs/design/apwlib.md).
+
+## License
+
+MIT © Michel Tricot · Not affiliated with Apple. Apple Passwords and iCloud
+Keychain are trademarks of Apple Inc.
