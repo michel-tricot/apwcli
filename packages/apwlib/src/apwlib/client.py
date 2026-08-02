@@ -24,8 +24,6 @@ from apwlib.models import OTPEntry, PasswordEntry
 from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
 from apwlib.protocol import WIRE_UNPAIRED, Command, Status
 
-_NO_DAEMON = "daemon not running"  # local message on DaemonNotRunningError (not wire-matched)
-
 
 class DaemonStatus(TypedDict):
     """The shape of :meth:`_Daemon.status`; keeps its two return paths in sync."""
@@ -78,7 +76,7 @@ class _Daemon:
             conn.settimeout(_TIMEOUT)
             conn.connect(self._socket_path)
         except OSError as exc:
-            raise DaemonNotRunningError(Status.INVALID_SESSION, _NO_DAEMON) from exc
+            raise DaemonNotRunningError("daemon not running") from exc
         try:
             conn.sendall((json.dumps(message) + "\n").encode())
             buffer = b""
@@ -93,7 +91,7 @@ class _Daemon:
             # timeout). Deliberately NOT DaemonNotRunningError: the request may
             # already have executed, so deliver()'s auto-start retry must not
             # re-send it.
-            raise SessionError(Status.INVALID_SESSION, "daemon connection lost mid-request") from exc
+            raise SessionError("daemon connection lost mid-request") from exc
         finally:
             conn.close()
 
@@ -224,18 +222,11 @@ class _Daemon:
         ``browser_pid`` (its process id); both are ``None`` otherwise.
         """
         try:
-            resp = self._send_raw({"op": "status"})
-        except SessionError:
-            return {
-                "running": False,
-                "bridge": False,
-                "paired": False,
-                "browser": None,
-                "browser_pid": None,
-                "pairing_state": None,
-            }
+            resp: dict[str, Any] = self._send_raw({"op": "status"})
+        except SessionError:  # unreachable, or lost mid-poll — either way not running
+            resp = {}
         return {
-            "running": True,
+            "running": bool(resp),
             "bridge": bool(resp.get("bridge")),
             "paired": bool(resp.get("paired")),
             "browser": resp.get("browser"),
@@ -335,7 +326,7 @@ class ApplePasswords:
                 self._pair()
                 response = self.daemon.deliver(message)  # retry once after pairing
             if _error(response) == WIRE_UNPAIRED:
-                raise NotPairedError(Status.INVALID_SESSION, "session is not paired")
+                raise NotPairedError("session is not paired")
         return response
 
     def _pair(self) -> None:

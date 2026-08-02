@@ -23,12 +23,15 @@ class ApwError(Exception):
     """Base error carrying a protocol ``Status``."""
 
     def __init__(self, status: Status | int, message: str | None = None) -> None:
-        self.status = Status(status) if not isinstance(status, Status) else status
+        self.status = Status(status)
         super().__init__(message or _STATUS_MESSAGES.get(self.status, "Unknown error"))
 
 
 class SessionError(ApwError):
     """The daemon is not running or the session is not paired."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(Status.INVALID_SESSION, message)
 
 
 class DaemonNotRunningError(SessionError):
@@ -42,14 +45,15 @@ class NotPairedError(SessionError):
 class ServerError(ApwError):
     """The extension returned an unexpected response."""
 
-
-_SUBCLASSES = {
-    Status.INVALID_SESSION: SessionError,
-    Status.SERVER_ERROR: ServerError,
-}
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(Status.SERVER_ERROR, message)
 
 
 def error_for(status: Status | int, message: str | None = None) -> ApwError:
     """Return the most specific ``ApwError`` subclass for ``status``."""
-    status = Status(status) if not isinstance(status, Status) else status
-    return _SUBCLASSES.get(status, ApwError)(status, message)
+    status = Status(status)
+    if status is Status.INVALID_SESSION:
+        return SessionError(message)
+    if status is Status.SERVER_ERROR:
+        return ServerError(message)
+    return ApwError(status, message)

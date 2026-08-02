@@ -130,7 +130,7 @@ def entries_from(data: dict[str, Any]) -> list[dict[str, Any]]:
 
     status = data.get("STATUS")
     if not isinstance(status, int):
-        raise ServerError(Status.SERVER_ERROR)
+        raise ServerError()
     if status == Status.NO_RESULTS:
         return []
     if status != Status.SUCCESS:

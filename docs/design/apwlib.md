@@ -236,8 +236,8 @@ provider, an unpaired call raises `NotPairedError`.
 For callers without a terminal, `apwlib.pinwindow.request_pin` is a bundled
 `pin_provider` that pops a dialog-sized PIN window: chauffeur opens the
 six-box code page (`page.html`) as a chromeless `--app` window with a
-throwaway profile — using an installed browser binary, preferring the browser
-the user is actually running. Anyone who can read the macOS PIN dialog is at
+throwaway profile — using the configured (or first installed) browser binary.
+Anyone who can read the macOS PIN dialog is at
 the screen, so an on-screen window is always answerable when pairing is
 possible at all. The page posts the PIN back over chauffeur's `py_chauffeur`
 channel (or an empty PIN from a close beacon, so a dismissed window fails

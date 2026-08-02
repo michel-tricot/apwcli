@@ -105,7 +105,7 @@ def test_no_daemon_autostart_retries_once(monkeypatch: pytest.MonkeyPatch) -> No
     def fake_send_raw(_msg):
         calls["raw"] += 1
         if calls["raw"] == 1:
-            raise DaemonNotRunningError(Status.INVALID_SESSION, "daemon not running")
+            raise DaemonNotRunningError("daemon not running")
         return {"id": "1", "data": {"STATUS": int(Status.SUCCESS), "Entries": []}}
 
     monkeypatch.setattr(pw.daemon, "_send_raw", fake_send_raw)

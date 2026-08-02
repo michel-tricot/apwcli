@@ -127,10 +127,10 @@ Every failure raises `ApwError` (or a subclass — `SessionError`,
 `DaemonNotRunningError`, `NotPairedError`, `ServerError`) carrying a `Status`:
 
 ```python
-from apwlib import SessionError, Status
+from apwlib import SessionError
 
 try:
-    raise SessionError(Status.INVALID_SESSION)
+    raise SessionError()
 except SessionError as exc:
     print(int(exc.status))
     #> 9

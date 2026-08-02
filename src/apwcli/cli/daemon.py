@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import subprocess
 
 import typer
 from apwlib import ApwError, Status
-from apwlib.browsers import BREW_CASKS, BROWSERS, installed_browsers
-from apwlib.config import read_config, write_config
+from apwlib.browsers import resolve_browser
+from apwlib.config import write_config
 from apwlib.paths import LOG_PATH
 
 from apwcli.cli.common import _prompt_pin, client, daemon_app, fail, render_status, status_line
-
-
-def _ensure_browser_installed() -> None:
-    """Fail with an install hint unless a supported browser is present."""
-    if not installed_browsers():
-        hints = "\n".join(f"  brew install --cask {BREW_CASKS[b.id]}  # {b.name}" for b in BROWSERS)
-        fail(ApwError(Status.GENERIC_ERROR, f"No supported browser found. Install one:\n{hints}"))
 
 
 def _require_ready(ready: bool) -> None:
@@ -34,23 +26,22 @@ def daemon_start(
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
-    _ensure_browser_installed()
-
     if browser:
+        # Validate before persisting: a bad id written to config would make every
+        # later start spawn a daemon that dies on startup.
+        if resolve_browser(browser.lower()) is None:
+            fail(ApwError(Status.INVALID_PARAM, f"browser not available: {browser}"))
         write_config({"browser": browser.lower()})
 
     if foreground:
-        from apwlib.browsers import resolve_browser
-        from apwlib.daemon import run
+        from apwlib.daemon.__main__ import main as run_foreground
 
-        chosen = resolve_browser(browser or read_config().get("browser"))
-        if chosen is None:
-            fail(ApwError(Status.INVALID_PARAM, f"Browser not available: {browser}"))
-        with contextlib.suppress(KeyboardInterrupt):
-            asyncio.run(run(chosen))
-        return
+        raise typer.Exit(code=run_foreground())
 
-    ready = client.daemon.start()  # spawn detached + wait for the bridge
+    try:
+        ready = client.daemon.start()  # spawn detached + wait for the bridge
+    except ApwError as exc:  # e.g. no supported browser installed
+        fail(exc)
     render_status(client.daemon.status())
     _require_ready(ready)
 
@@ -76,8 +67,10 @@ def daemon_stop() -> None:
 @daemon_app.command("restart")
 def daemon_restart() -> None:
     """Stop any running daemon and start a fresh one (fixes a wedged daemon)."""
-    _ensure_browser_installed()  # else restart()'s spawn would raise uncaught
-    ready = client.daemon.restart()
+    try:
+        ready = client.daemon.restart()
+    except ApwError as exc:  # e.g. no supported browser installed
+        fail(exc)
     render_status(client.daemon.status())
     _require_ready(ready)
 

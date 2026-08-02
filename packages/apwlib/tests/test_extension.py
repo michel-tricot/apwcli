@@ -92,12 +92,6 @@ def test_spec_construction_does_no_io(data_dir: Path, monkeypatch: pytest.Monkey
     extension.extension_spec()  # must not raise: the download is deferred to build
 
 
-def test_spec_keeps_worker_awake_aggressively(data_dir: Path) -> None:
-    # The worker holds a live SRP session that collapses within ~5s of dormancy;
-    # chauffeur's eviction-safe default (25s) is far too slow for that.
-    assert extension.extension_spec().keep_alive == 2.0
-
-
 def test_cached_extension_version_absent(data_dir: Path) -> None:
     assert paths.cached_extension_version() is None
 

@@ -5,20 +5,6 @@ facade (``apwlib.ApplePasswords``) never imports it; it launches the daemon as a
 process (``python -m apwlib.daemon``) and talks to it over the socket.
 """
 
-# Browser discovery lives in apwlib.browsers (it's shared with pinwindow); re-exported
-# here for compatibility.
-from apwlib.browsers import (
-    BROWSERS,
-    BrowserInfo,
-    installed_browsers,
-    resolve_browser,
-)
 from apwlib.daemon.server import run
 
-__all__ = [
-    "BROWSERS",
-    "BrowserInfo",
-    "installed_browsers",
-    "resolve_browser",
-    "run",
-]
+__all__ = ["run"]

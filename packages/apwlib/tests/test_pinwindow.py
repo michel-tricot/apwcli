@@ -56,7 +56,6 @@ def _install(monkeypatch: pytest.MonkeyPatch, fake_cls: type[_FakeWindow]) -> li
 @pytest.fixture
 def fake_browser(monkeypatch: pytest.MonkeyPatch) -> BrowserInfo:
     browser = BrowserInfo(id="fake", name="Fake", binary=Path("/fake"), data_dir=None)
-    monkeypatch.setattr(pinwindow, "_running_browser", lambda: None)
     monkeypatch.setattr(pinwindow, "resolve_browser", lambda _selected: browser)
     return browser
 
@@ -139,7 +138,6 @@ def test_request_pin_launch_failure(fake_browser: BrowserInfo, monkeypatch: pyte
 
 
 def test_request_pin_without_browser(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pinwindow, "_running_browser", lambda: None)
     monkeypatch.setattr(pinwindow, "resolve_browser", lambda _selected: None)
     with pytest.raises(NotPairedError, match="browser"):
         request_pin(timeout=1)
@@ -163,38 +161,3 @@ def test_style_prefers_user_override(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 def test_style_defaults_to_bundled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(pinwindow, "PIN_STYLE_PATH", tmp_path / "absent.css")
     assert ".boxes" in pinwindow._style(None)  # the bundled default styles the code boxes
-
-
-def _ps_result(lines: list[str]) -> object:
-    class Result:
-        stdout = "\n".join(lines)
-
-    return Result()
-
-
-def _browsers() -> list[BrowserInfo]:
-    return [BrowserInfo(id=i, name=i.title(), binary=Path(f"/Applications/{i}"), data_dir=None) for i in ("brave", "chrome")]
-
-
-def test_running_browser_prefers_the_users_browser(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pinwindow, "installed_browsers", _browsers)
-    lines = [
-        # The daemon's managed instance must not count as "the user's browser".
-        "/Applications/brave --user-data-dir=" + str(pinwindow.BROWSER_PROFILE_DIR / "brave"),
-        "/Applications/chrome",
-    ]
-    monkeypatch.setattr(pinwindow.subprocess, "run", lambda *a, **k: _ps_result(lines))
-    browser = pinwindow._running_browser()
-    assert browser is not None and browser.id == "chrome"
-
-
-def test_running_browser_none_when_only_managed_instances(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(pinwindow, "installed_browsers", _browsers)
-    lines = [
-        "/Applications/brave --user-data-dir=" + str(pinwindow.BROWSER_PROFILE_DIR / "brave"),
-        ("/Applications/chrome --app=file:///tmp/apwlib-pin-x/page.html --user-data-dir=/tmp/apwlib-pin-x/profile"),
-    ]
-    monkeypatch.setattr(pinwindow.subprocess, "run", lambda *a, **k: _ps_result(lines))
-    assert pinwindow._running_browser() is None

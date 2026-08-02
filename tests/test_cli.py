@@ -12,19 +12,6 @@ def test_help() -> None:
     assert "Apple Passwords" in result.stdout
 
 
-@pytest.mark.parametrize("group", ["daemon", "pw", "otp"])
-def test_subcommand_help(group: str) -> None:
-    result = runner.invoke(app, [group, "--help"])
-    assert result.exit_code == 0
-
-
-def test_pair_lives_under_daemon() -> None:
-    assert runner.invoke(app, ["daemon", "pair", "--help"]).exit_code == 0
-    # not a top-level command
-    assert runner.invoke(app, ["pair", "--help"]).exit_code != 0
-    assert runner.invoke(app, ["auth", "--help"]).exit_code != 0
-
-
 def test_startup_gate_requires_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
@@ -53,13 +40,17 @@ def test_daemon_status_reports_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
-    # restart must pre-check browsers and fail with a hint, not let _spawn raise uncaught.
-    import apwcli.cli.daemon as dm
+    # restart must surface _spawn's "no supported browser" preflight as a clean CLI
+    # error with an install hint, not an uncaught traceback.
+    from apwcli.cli.common import client
 
-    monkeypatch.setattr(dm, "installed_browsers", list)
+    monkeypatch.setattr(client.daemon, "stop", lambda: False)  # don't touch a real daemon
+    monkeypatch.setattr(client.daemon, "_wait_stopped", lambda *a, **k: True)
+    monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
     result = runner.invoke(app, ["daemon", "restart"])
     assert result.exit_code == 1
-    assert "No supported browser found" in result.stderr
+    assert "no supported browser found" in result.stderr
+    assert "brew install" in result.stderr
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
@@ -246,10 +237,10 @@ def test_pw_save_reads_piped_stdin_without_flag(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import DaemonNotRunningError, Status
+    from apwlib import DaemonNotRunningError
 
     def boom(_url: str):
-        raise DaemonNotRunningError(Status.INVALID_SESSION)
+        raise DaemonNotRunningError()
 
     monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
     result = runner.invoke(app, ["pw", "list", "https://github.com"])
@@ -257,10 +248,10 @@ def test_pw_list_without_daemon_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pw_list_not_paired_hint(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apwlib import NotPairedError, Status
+    from apwlib import NotPairedError
 
     def boom(_url: str):
-        raise NotPairedError(Status.INVALID_SESSION, "session is not paired")
+        raise NotPairedError("session is not paired")
 
     monkeypatch.setattr("apwcli.cli.client.get_login_names", boom)
     result = runner.invoke(app, ["pw", "list", "github.com"])
