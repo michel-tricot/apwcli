@@ -2,10 +2,11 @@
 
 Usage:
 
-    uv run python examples/03-save-password/main.py example.com me@example.com
+    uv run python examples/03-save-password/main.py [url] <username>
 
-The password is prompted for (never passed on the command line, where it would
-be visible in the shell history and `ps`).
+The url defaults to github.com when only a username is given. The password is
+prompted for (never passed on the command line, where it would be visible in
+the shell history and `ps`).
 """
 
 from __future__ import annotations
@@ -18,10 +19,14 @@ from apwlib.pinwindow import request_pin
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print(f"usage: {sys.argv[0]} <url> <username>", file=sys.stderr)
+    args = sys.argv[1:]
+    if len(args) == 1:
+        url, username = "github.com", args[0]
+    elif len(args) == 2:
+        url, username = args
+    else:
+        print(f"usage: {sys.argv[0]} [url] <username>", file=sys.stderr)
         return 2
-    url, username = sys.argv[1], sys.argv[2]
 
     pw = ApplePasswords(pin_provider=request_pin)
     try:
