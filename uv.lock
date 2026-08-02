@@ -349,14 +349,14 @@ wheels = [
 
 [[package]]
 name = "chauffeur"
-version = "0.14.0"
-source = { registry = "../chauffeur/dist" }
+version = "0.14.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "websockets" },
 ]
-sdist = { path = "chauffeur-0.14.0.tar.gz" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/b5/4b83e3d75f6f9894d831197e32cb58ee732628a2dc0689b4da86955b569d/chauffeur-0.14.1.tar.gz", hash = "sha256:ac9c0ec512c6e52248b1c56c2b4b6d691e373d704ff149a175232d8abdadc663", size = 109402, upload-time = "2026-08-02T00:29:12.617Z" }
 wheels = [
-    { path = "chauffeur-0.14.0-py3-none-any.whl" },
+    { url = "https://files.pythonhosted.org/packages/fe/d5/5e49550fb5d52e68fe89ce19af0b074d11915a107f7f779521cd2f6049ea/chauffeur-0.14.1-py3-none-any.whl", hash = "sha256:91e8cde21158a58772595d09fcc79a465a7da61ae49667f918e7b3bd6e8b84d2", size = 41923, upload-time = "2026-08-02T00:29:11.402Z" },
 ]
 
 [[package]]
