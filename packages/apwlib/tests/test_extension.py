@@ -9,7 +9,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import pytest
-from apwlib import paths
+from apwlib import _paths as paths
 from apwlib.daemon import extension
 from chauffeur import build_extension
 from chauffeur.extension import ExtensionNotFoundError
@@ -61,7 +61,7 @@ def test_bridge_reads_only_injected_config_keys(data_dir: Path, monkeypatch: pyt
     # bridge.js reads globalThis.__chauffeur_config.<key> for every wire constant;
     # a key it references but extension_spec doesn't inject would boot the bridge
     # with undefined constants. Guard the one remaining cross-language coupling.
-    from apwlib.protocol import WIRE_UNPAIRED
+    from apwlib._protocol import WIRE_UNPAIRED
 
     monkeypatch.setattr("chauffeur.extension.download_extension", _fake_download("// pristine\n"))
     built = build_extension(extension.extension_spec(), tmp_path / "build")

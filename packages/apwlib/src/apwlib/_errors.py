@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apwlib.protocol import Status
+from apwlib._protocol import Status
 
 _STATUS_MESSAGES = {
     Status.SUCCESS: "Operation successful",

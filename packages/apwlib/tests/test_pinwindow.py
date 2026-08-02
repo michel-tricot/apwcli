@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from apwlib import NotPairedError, pinwindow
-from apwlib.browsers import BrowserInfo
+from apwlib._browsers import BrowserInfo
 from apwlib.pinwindow import request_pin
 from chauffeur.launch import LaunchError
 

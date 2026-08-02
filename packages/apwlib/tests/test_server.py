@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from apwlib.browsers import BrowserInfo
+from apwlib._browsers import BrowserInfo
+from apwlib._protocol import Status
 from apwlib.daemon import server
-from apwlib.protocol import Status
 
 
 class _FakeReader:

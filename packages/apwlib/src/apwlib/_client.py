@@ -13,8 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
-from apwlib import protocol
-from apwlib.errors import (
+from apwlib import _protocol as protocol
+from apwlib._errors import (
     ApwError,
     DaemonNotRunningError,
     DaemonStartError,
@@ -22,9 +22,9 @@ from apwlib.errors import (
     SessionError,
     error_for,
 )
-from apwlib.models import OTPEntry, PasswordEntry
-from apwlib.paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import WIRE_UNPAIRED, Status
+from apwlib._models import OTPEntry, PasswordEntry
+from apwlib._paths import LOCK_PATH, LOG_PATH, SOCKET_PATH, ensure_data_dir
+from apwlib._protocol import WIRE_UNPAIRED, Status
 
 
 class DaemonStatus(TypedDict):
@@ -126,7 +126,7 @@ class Daemon:
         # Preflight: without a browser the detached daemon would just die on startup, and the
         # caller would wait out _wait_bridge and get a misleading "daemon not running". Fail
         # fast here so every entry point (auto-start included) reports the real cause.
-        from apwlib.browsers import BROWSERS, installed_browsers
+        from apwlib._browsers import BROWSERS, installed_browsers
 
         if not installed_browsers():
             names = ", ".join(b.name for b in BROWSERS)
@@ -196,18 +196,39 @@ class Daemon:
         if not self._wait_bridge():
             raise DaemonStartError(f"daemon did not become ready; see {LOG_PATH}")
 
+    def _validate_browser(self, browser: str | None) -> None:
+        """Reject an unknown/uninstalled browser id up front — before any stop or spawn."""
+        if browser is None:
+            return
+        from apwlib._browsers import installed_browsers, resolve_browser
+
+        if resolve_browser(browser) is None:
+            ids = ", ".join(b.id for b in installed_browsers())
+            hint = f" (installed: {ids})" if ids else ""
+            raise ApwError(Status.INVALID_PARAM, f"browser not available: {browser}{hint}")
+
     def start(self, browser: str | None = None) -> None:
         """Ensure a daemon is running with its bridge connected.
 
-        A no-op when one is already reachable. Otherwise spawns one — after waiting
-        out a stopping daemon's singleton lock, so `stop` immediately followed by
-        `start` works. ``browser`` overrides the configured browser for this daemon
-        only (it is not persisted). Raises ``DaemonStartError`` if the bridge does
-        not come up, and ``ApwError`` when no supported browser is installed.
+        A no-op when one is already reachable — except with an explicit ``browser``,
+        which needs a fresh daemon and raises instead (use :meth:`restart`). Otherwise
+        spawns one — after waiting out a stopping daemon's singleton lock, so `stop`
+        immediately followed by `start` works. ``browser`` applies to that daemon only
+        (it is not persisted). Raises ``DaemonStartError`` if the bridge does not come
+        up, and ``ApwError`` when no supported browser is installed.
         """
-        if not self.status()["running"]:
-            self._wait_stopped()  # a stopping daemon releases the lock last
-            self._spawn(browser)
+        self._validate_browser(browser)
+        status = self.status()
+        if status["running"]:
+            if browser is not None:
+                raise ApwError(
+                    Status.INVALID_PARAM,
+                    f"daemon already running with {status['browser']} — restart to switch browsers",
+                )
+            self._require_bridge()
+            return
+        self._wait_stopped()  # a stopping daemon releases the lock last
+        self._spawn(browser)
         self._require_bridge()
 
     def stop(self) -> bool:
@@ -220,6 +241,7 @@ class Daemon:
 
     def restart(self, browser: str | None = None) -> None:
         """Stop any running daemon and start a fresh one (raises like :meth:`start`)."""
+        self._validate_browser(browser)  # before the stop — don't kill a daemon for a typo
         self.stop()
         self._wait_stopped()
         self._spawn(browser)

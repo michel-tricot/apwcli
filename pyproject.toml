@@ -80,6 +80,8 @@ ignore = [
 "packages/apwlib/src/apwlib/daemon/**" = ["T201"]
 # Tests: asserts, magic values, fake tokens/paths, args that exist to match signatures.
 "**/tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "ARG", "A002", "A006"]
+# Examples are terminal scripts: they print their results and index into argv.
+"examples/**" = ["T201", "PLR2004"]
 
 [tool.pytest.ini_options]
 testpaths = [

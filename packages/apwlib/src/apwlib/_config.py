@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from apwlib.paths import CONFIG_PATH, ensure_data_dir
+from apwlib._paths import CONFIG_PATH, ensure_data_dir
 
 
 def read_config() -> dict[str, Any]:

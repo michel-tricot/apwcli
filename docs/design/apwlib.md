@@ -160,19 +160,24 @@ light.
 
 ## Module layout
 
+The public surface is the package root (`apwlib`) plus two blessed modules,
+`apwlib.pinwindow` and `apwlib.diagnostics`. Underscored modules are internal
+and may change without notice; `daemon/` keeps its plain name because it is the
+`python -m apwlib.daemon` entry point, but it is internal too.
+
 ```
-client.py       ApplePasswords facade (password API) + Daemon (transport,
+_client.py      ApplePasswords facade (password API) + Daemon (transport,
                   lifecycle, pairing — its own public class; the facade keeps
-                  a private instance)
-protocol.py     Command / Action / Status enums, message builders, response parsing
-models.py       PasswordEntry, OTPEntry
-errors.py       ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired,
-                  plus DaemonStartError)
+                  a private instance); both re-exported at the root
+_protocol.py    Command / Action / Status enums, message builders, response parsing
+_models.py      PasswordEntry, OTPEntry (re-exported at the root)
+_errors.py      ApwError hierarchy (SessionError → DaemonNotRunning / NotPaired,
+                  plus DaemonStartError); re-exported at the root
 diagnostics.py  run_checks — structured health checks (backs `apwcli doctor`)
-config.py       read/write ~/.apwlib/config.json
-paths.py        ~/.apwlib locations (socket, lock, extension dir, browser profile)
-browsers.py     approved-browser catalog (chauffeur's discovery + our profile/cask
-                  decoration; shared by daemon/ and pinwindow/)
+_config.py      read/write ~/.apwlib/config.json
+_paths.py       ~/.apwlib locations (socket, lock, extension dir, browser profile)
+_browsers.py    approved-browser catalog (apwlib's own BrowserInfo over
+                  chauffeur's discovery; shared by daemon/ and pinwindow/)
 pinwindow/
   __init__.py   request_pin — no-TTY pin_provider (chauffeur app window)
   page.html     the six-box code page

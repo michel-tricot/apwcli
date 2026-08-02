@@ -11,16 +11,18 @@ import asyncio
 import contextlib
 import sys
 
-from apwlib.browsers import resolve_browser
-from apwlib.config import read_config
+from apwlib._browsers import resolve_browser
+from apwlib._config import read_config
 from apwlib.daemon import run
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    browser = resolve_browser(args[0] if args else read_config().get("browser"))
+    selected = args[0] if args else read_config().get("browser")
+    browser = resolve_browser(selected)
     if browser is None:
-        print("apwlib: no supported browser installed", file=sys.stderr)
+        what = f"browser not available: {selected}" if selected else "no supported browser installed"
+        print(f"apwlib: {what}", file=sys.stderr)
         return 1
     # Ctrl-C during launch (before the loop's signal handlers are installed) still
     # lands here as KeyboardInterrupt; treat it as a clean stop, not a traceback.

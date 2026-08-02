@@ -126,5 +126,7 @@ except SessionError as exc:
     #> 9
 ```
 
-See the [design notes](../../docs/design/apwlib.md) for how the library talks
-to Apple Passwords and why a browser is involved.
+Runnable scripts for all of the above live in
+[examples/](../../examples). See the
+[design notes](../../docs/design/apwlib.md) for how the library talks to
+Apple Passwords and why a browser is involved.

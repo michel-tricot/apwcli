@@ -1,4 +1,4 @@
-from apwlib.models import OTPEntry, PasswordEntry
+from apwlib._models import OTPEntry, PasswordEntry
 
 
 def test_password_entry_from_raw() -> None:

@@ -23,10 +23,10 @@ from pathlib import Path
 
 from chauffeur import LaunchError, LaunchSpec, SyncBrowser, Window
 
-from apwlib.browsers import BrowserInfo, resolve_browser
-from apwlib.config import read_config
-from apwlib.errors import NotPairedError
-from apwlib.paths import PIN_STYLE_PATH
+from apwlib._browsers import BrowserInfo, resolve_browser
+from apwlib._config import read_config
+from apwlib._errors import NotPairedError
+from apwlib._paths import PIN_STYLE_PATH
 
 _TIMEOUT = 120.0  # seconds a human gets to read the macOS dialog and type the PIN
 _WINDOW_SIZE = (390, 320)

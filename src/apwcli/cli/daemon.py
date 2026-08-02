@@ -8,18 +8,8 @@ import subprocess
 
 import typer
 from apwlib import ApwError, Status
-from apwlib.browsers import resolve_browser
 
 from apwcli.cli.common import _prompt_pin, daemon_app, daemon_client, fail, render_status, status_line
-
-
-def _validated_browser(browser: str | None) -> str | None:
-    """The lowercased browser id to use for this invocation, or None for auto/config."""
-    if not browser:
-        return None
-    if resolve_browser(browser.lower()) is None:
-        fail(ApwError(Status.INVALID_PARAM, f"browser not available: {browser}"))
-    return browser.lower()
 
 
 @daemon_app.command("start")
@@ -28,7 +18,7 @@ def daemon_start(
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
 ) -> None:
     """Start the managed daemon (usually unnecessary — commands auto-start it)."""
-    chosen = _validated_browser(browser)
+    chosen = browser.lower() if browser else None  # validated by Daemon.start / the daemon itself
 
     if foreground:
         from apwlib.daemon.__main__ import main as run_foreground
@@ -37,7 +27,7 @@ def daemon_start(
 
     try:
         daemon_client.start(chosen)  # spawn detached + wait for the bridge
-    except ApwError as exc:  # no supported browser, or the bridge never came up
+    except ApwError as exc:  # no/unknown browser, already running with -b, or bridge never came up
         fail(exc)
     render_status(daemon_client.status())
 
@@ -70,7 +60,7 @@ def daemon_restart(
     browser: str = typer.Option(None, "--browser", "-b", help="Browser to manage for this daemon (auto, chromium, chrome, brave, edge)."),
 ) -> None:
     """Stop any running daemon and start a fresh one (fixes a wedged daemon)."""
-    chosen = _validated_browser(browser)
+    chosen = browser.lower() if browser else None  # validated by Daemon.restart
     try:
         daemon_client.restart(chosen)
     except ApwError as exc:  # no supported browser, or the bridge never came up

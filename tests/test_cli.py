@@ -46,7 +46,7 @@ def test_daemon_restart_without_browser_fails_cleanly(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(daemon_client, "stop", lambda: False)  # don't touch a real daemon
     monkeypatch.setattr(daemon_client, "_wait_stopped", lambda *a, **k: True)
-    monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
+    monkeypatch.setattr("apwlib._browsers.installed_browsers", list)
     result = runner.invoke(app, ["daemon", "restart"])
     assert result.exit_code == 1
     assert "no supported browser found" in result.stderr
@@ -77,26 +77,38 @@ def test_daemon_status_json(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_daemon_start_browser_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> None:
     # -b picks the browser for this daemon only; nothing is persisted to config.
-    from pathlib import Path
-
-    from apwlib.browsers import BrowserInfo
-
     started: list = []
     config_writes: list = []
-    monkeypatch.setattr(
-        "apwcli.cli.daemon.resolve_browser",
-        lambda _s: BrowserInfo(id="chrome", name="Chrome", binary=Path("/x")),
-    )
     monkeypatch.setattr("apwcli.cli.common.daemon_client.start", lambda b=None: started.append(b))
     monkeypatch.setattr(
         "apwcli.cli.common.daemon_client.status",
-        lambda: {"running": True, "bridge": True, "paired": False},
+        lambda: {"running": False, "bridge": False, "paired": False},
     )
-    monkeypatch.setattr("apwlib.config.write_config", lambda patch: config_writes.append(patch) or patch)
+    monkeypatch.setattr("apwlib._config.write_config", lambda patch: config_writes.append(patch) or patch)
     result = runner.invoke(app, ["daemon", "start", "-b", "Chrome"])
     assert result.exit_code == 0
-    assert started == ["chrome"]
+    assert started == ["chrome"]  # lowercased and passed through to this daemon only
     assert config_writes == []
+
+
+def test_daemon_start_browser_with_running_daemon_points_at_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    # -b can't be honored without a fresh daemon; a silent no-op would look like success.
+    from pathlib import Path
+
+    from apwlib._browsers import BrowserInfo
+
+    monkeypatch.setattr(
+        "apwlib._browsers.installed_browsers",
+        lambda: [BrowserInfo(id="chrome", name="Chrome", binary=Path("/x"))],
+    )
+    monkeypatch.setattr(
+        "apwcli.cli.common.daemon_client.status",
+        lambda: {"running": True, "bridge": True, "paired": True, "browser": "Brave", "browser_pid": 7},
+    )
+    result = runner.invoke(app, ["daemon", "start", "-b", "chrome"])
+    assert result.exit_code == 2  # INVALID_PARAM
+    assert "already running with Brave" in result.stderr
+    assert "restart" in result.stderr
 
 
 def test_otp_get_filters_by_username(monkeypatch: pytest.MonkeyPatch) -> None:

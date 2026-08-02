@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from chauffeur import ExtensionSpec
 
+from apwlib._paths import DATA_DIR, EXTENSION_ID
+from apwlib._protocol import WIRE_UNPAIRED, Status
 from apwlib.daemon.bridge import BRIDGE_JS
-from apwlib.paths import DATA_DIR, EXTENSION_ID
-from apwlib.protocol import WIRE_UNPAIRED, Status
 
 _BACKGROUND = "background.js"
 # Bounds how long an offline daemon start waits before falling back to the cache.

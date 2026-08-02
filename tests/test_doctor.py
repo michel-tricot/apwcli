@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from apwlib.browsers import BrowserInfo
+from apwlib._browsers import BrowserInfo
 from typer.testing import CliRunner
 
 from apwcli.cli import app

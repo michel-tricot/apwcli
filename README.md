@@ -12,6 +12,7 @@ Read passwords and one-time codes, save logins, script it all.
 
 [Commands](docs/apwcli.md) ·
 [Python library](packages/apwlib) ·
+[Examples](examples) ·
 [How it works](docs/design/apwlib.md)
 
 </div>

@@ -18,7 +18,7 @@ from pathlib import Path
 from chauffeur import installed_browsers as _chauffeur_installed
 from chauffeur.browsers import catalog as _chauffeur_catalog
 
-from apwlib.paths import BROWSER_PROFILE_DIR
+from apwlib._paths import BROWSER_PROFILE_DIR
 
 __all__ = ["BREW_CASKS", "BROWSERS", "BrowserInfo", "installed_browsers", "profile_for", "resolve_browser"]
 

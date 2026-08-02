@@ -2,8 +2,8 @@
 
 from importlib.metadata import version
 
-from apwlib.client import ApplePasswords, Daemon, DaemonStatus
-from apwlib.errors import (
+from apwlib._client import ApplePasswords, Daemon, DaemonStatus
+from apwlib._errors import (
     ApwError,
     DaemonNotRunningError,
     DaemonStartError,
@@ -11,8 +11,8 @@ from apwlib.errors import (
     ServerError,
     SessionError,
 )
-from apwlib.models import OTPEntry, PasswordEntry
-from apwlib.protocol import Status
+from apwlib._models import OTPEntry, PasswordEntry
+from apwlib._protocol import Status
 
 __all__ = [
     "ApplePasswords",

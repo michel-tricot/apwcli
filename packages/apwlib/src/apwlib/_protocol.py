@@ -126,7 +126,7 @@ def entries_from(data: dict[str, Any]) -> list[dict[str, Any]]:
     Raises ``ApwError`` for non-success, non-"no results" statuses. Entries arrive either
     as an ``Entries`` array or as ``Entry_0``…``Entry_n`` keys.
     """
-    from apwlib.errors import ServerError, error_for
+    from apwlib._errors import ServerError, error_for
 
     status = data.get("STATUS")
     if not isinstance(status, int):

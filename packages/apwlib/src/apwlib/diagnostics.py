@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from apwlib.browsers import BREW_CASKS, BROWSERS, installed_browsers
-from apwlib.client import Daemon
-from apwlib.paths import APPLE_NATIVE_MANIFEST, cached_extension_version
+from apwlib._browsers import BREW_CASKS, BROWSERS, installed_browsers
+from apwlib._client import Daemon
+from apwlib._paths import APPLE_NATIVE_MANIFEST, cached_extension_version
 
 
 @dataclass(frozen=True)

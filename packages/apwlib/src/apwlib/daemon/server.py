@@ -26,11 +26,11 @@ from pathlib import Path
 
 from chauffeur import Browser, ExtensionNotFoundError, JSError, LaunchSpec, wipe_profile
 
-from apwlib.browsers import BrowserInfo, profile_for
+from apwlib._browsers import BrowserInfo, profile_for
+from apwlib._errors import ApwError
+from apwlib._paths import APPLE_NATIVE_MANIFEST, LOCK_PATH, SOCKET_PATH, ensure_data_dir
+from apwlib._protocol import WIRE_NO_BRIDGE, Command, Status
 from apwlib.daemon.extension import extension_spec
-from apwlib.errors import ApwError
-from apwlib.paths import APPLE_NATIVE_MANIFEST, LOCK_PATH, SOCKET_PATH, ensure_data_dir
-from apwlib.protocol import WIRE_NO_BRIDGE, Command, Status
 
 REQUEST_TIMEOUT = 30.0
 CHALLENGE_TIMEOUT = 10.0  # challenge -> MSG1Set (the native round trip the PIN must wait for)

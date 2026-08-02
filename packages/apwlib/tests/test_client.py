@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from apwlib import ApplePasswords, ApwError, Daemon, DaemonNotRunningError, DaemonStartError, NotPairedError
-from apwlib.protocol import Status
+from apwlib._protocol import Status
 
 
 def test_no_daemon_raises_daemon_not_running() -> None:
@@ -69,7 +69,7 @@ def test_daemon_lost_mid_request_raises_session_error() -> None:
     import socket
     import threading
 
-    from apwlib.errors import SessionError
+    from apwlib._errors import SessionError
 
     # /tmp, not tmp_path: macOS caps AF_UNIX socket paths at ~104 bytes.
     sock_path = "/tmp/apwlib-test-hangup.sock"
@@ -123,7 +123,7 @@ def test_autostart_without_browser_fails_fast(monkeypatch: pytest.MonkeyPatch) -
     # Auto-start must report "no supported browser" immediately, not spawn a daemon that
     # dies and leave the caller waiting on a bridge that never comes.
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr("apwlib.browsers.installed_browsers", list)
+    monkeypatch.setattr("apwlib._browsers.installed_browsers", list)
     spawned = []
     pw = ApplePasswords(socket_path="/tmp/apwlib-does-not-exist.sock")  # auto_start=True
     monkeypatch.setattr(pw._daemon, "_wait_stopped", lambda *a, **k: True)
@@ -158,6 +158,53 @@ def test_start_waits_out_a_stopping_daemon(monkeypatch: pytest.MonkeyPatch) -> N
     assert order == ["waited", "spawned"]
 
 
+def test_start_rejects_unknown_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An unknown/uninstalled browser id must fail before spawning a daemon that
+    # would just die on startup.
+    from apwlib._browsers import BrowserInfo
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(
+        "apwlib._browsers.installed_browsers",
+        lambda: [BrowserInfo(id="chrome", name="Chrome", binary=Path("/x"))],
+    )
+    daemon = Daemon(auto_start=False)
+    monkeypatch.setattr(daemon, "status", lambda: {"running": False, "bridge": False, "paired": False})
+    monkeypatch.setattr(daemon, "_wait_stopped", lambda *a, **k: True)
+    with pytest.raises(ApwError, match="browser not available"):
+        daemon.start("netscape")
+
+
+def test_restart_rejects_unknown_browser_before_stopping(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A typo'd -b must not take down a healthy daemon: validate before the stop.
+    from apwlib._browsers import BrowserInfo
+
+    monkeypatch.setattr(
+        "apwlib._browsers.installed_browsers",
+        lambda: [BrowserInfo(id="chrome", name="Chrome", binary=Path("/x"))],
+    )
+    daemon = Daemon(auto_start=False)
+    stopped: list = []
+    monkeypatch.setattr(daemon, "stop", lambda: stopped.append(1))
+    with pytest.raises(ApwError, match="browser not available"):
+        daemon.restart("netscape")
+    assert stopped == []
+
+
+def test_start_with_browser_refuses_running_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An explicit browser needs a fresh daemon; a silent no-op would look like success.
+    from apwlib._browsers import BrowserInfo
+
+    monkeypatch.setattr(
+        "apwlib._browsers.installed_browsers",
+        lambda: [BrowserInfo(id="chrome", name="Chrome", binary=Path("/x"))],
+    )
+    daemon = Daemon(auto_start=False)
+    monkeypatch.setattr(daemon, "status", lambda: {"running": True, "bridge": True, "paired": True, "browser": "Brave", "browser_pid": 7})
+    with pytest.raises(ApwError, match="already running"):
+        daemon.start("chrome")
+
+
 def test_start_raises_when_bridge_never_comes(monkeypatch: pytest.MonkeyPatch) -> None:
     # A spawned daemon whose bridge never connects is an error with a pointer at the
     # log — not a silent False the caller has to translate.
@@ -174,7 +221,7 @@ def test_singleton_free_detects_lock_holder(monkeypatch: pytest.MonkeyPatch, tmp
     import fcntl
     import os
 
-    from apwlib import client
+    from apwlib import _client as client
 
     lock = tmp_path / "daemon.lock"
     monkeypatch.setattr(client, "LOCK_PATH", lock)

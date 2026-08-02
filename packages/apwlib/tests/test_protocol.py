@@ -1,7 +1,7 @@
 import pytest
 from apwlib import Status
-from apwlib.errors import ApwError
-from apwlib.protocol import (
+from apwlib._errors import ApwError
+from apwlib._protocol import (
     Action,
     Command,
     entries_from,
