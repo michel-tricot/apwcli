@@ -21,7 +21,7 @@ the vault to your terminal, your scripts, and your agents.
 - **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
 - **Safe by default** — passwords are masked on screen; `-c` copies to the clipboard instead
 - **Scriptable** — JSON/TSV output everywhere; Python API via `apwlib`
-- **Zero setup** — the daemon auto-starts on first use and pairs on demand
+- **Zero setup** — everything starts and pairs automatically on first use
 
 ## Install
 
@@ -47,8 +47,9 @@ apwcli pw get github.com me@example.com -c   # copy one password to the clipboar
 apwcli otp get github.com                # current one-time code
 ```
 
-The first command sets everything up: it starts the daemon and, if needed,
-walks you through the one-time PIN pairing. From Python:
+The first command sets everything up. If pairing is needed, macOS shows a
+6-digit PIN and apwcli prompts for it — that's the whole ceremony. From
+Python:
 
 ```python
 from apwlib import ApplePasswords

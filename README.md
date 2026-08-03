@@ -24,7 +24,7 @@ Read passwords and one-time codes, save logins, script it all.
 - ✨ **Agent-ready** — bundled Claude skill and MCP server (`apwcli mcp install`)
 - **Safe by default** — passwords are masked on screen; `-c` copies to the clipboard instead
 - **Scriptable** — JSON/TSV output everywhere; Python API via [`apwlib`](packages/apwlib)
-- **Zero setup** — a background daemon auto-starts on first use and pairs on demand
+- **Zero setup** — everything starts and pairs automatically on first use
 
 ## Install
 
@@ -46,12 +46,9 @@ apwcli pw get github.com me@example.com  # narrow to one account
 apwcli otp get github.com                # current one-time code
 ```
 
-The first command sets everything up: it starts the daemon and, if needed,
-pairs — macOS shows a 6-digit PIN, apwcli prompts for it, and you're set for
-as long as the daemon runs.
-
-Something not working? `apwcli doctor` checks the whole chain — browser,
-extension, daemon, pairing — and tells you what to fix.
+The first command sets everything up. If pairing is needed, macOS shows a
+6-digit PIN and apwcli prompts for it — that's the whole ceremony. Anything
+misbehaving? See [Troubleshooting](#troubleshooting).
 
 ## Security
 
@@ -71,8 +68,8 @@ This is a tool for your passwords, so here's exactly what it does with them:
   one-time codes, saving, and pairing — but not password reads unless you
   explicitly run it with `--allow-passwords` (MCP results travel to the model
   provider).
-- **Nothing sensitive is logged.** The daemon log records lifecycle and errors
-  only; command bodies are encrypted inside the browser and never written in
+- **Nothing sensitive is logged.** The log records lifecycle and errors only;
+  command bodies are encrypted inside the browser and never written in
   plaintext.
 
 Full details — the launch constraint, the pairing handshake, the threat model —
@@ -117,26 +114,9 @@ apwcli pw get github.com me@example.com -o text | cut -f3
 apwcli otp get github.com -o json | jq -r '.results[0].code'
 ```
 
-Errors exit with the protocol status code (`9` = daemon down or not paired)
-and print `error: …` to stderr, or a JSON object with `-o json`.
-
-### Daemon & pairing
-
-Commands auto-start a background daemon on first use and pair on demand — an
-unpaired command pops the macOS PIN dialog and prompts for the code, so you
-never launch or supervise anything. Without a terminal (scripts, agents, GUI
-apps), the prompt becomes a small on-screen PIN window instead. A pairing
-lasts for the daemon's lifetime; keeping the daemon running keeps the PIN
-rare.
-
-```sh
-apwcli doctor           # diagnose the whole setup (browser, extension, pairing)
-apwcli daemon status    # daemon / extension / pairing state
-apwcli daemon pair      # pair explicitly; --pin 123456 to skip the prompt
-apwcli daemon restart   # replace a wedged daemon with a fresh one
-apwcli daemon logs      # tail the daemon log (-f to follow, --clear to wipe)
-apwcli daemon stop      # stop the daemon and its browser
-```
+Errors exit with the protocol status code (`9` = not paired, or nothing to
+talk to — see [Troubleshooting](#troubleshooting)) and print `error: …` to
+stderr, or a JSON object with `-o json`.
 
 ## Agents
 
@@ -167,6 +147,25 @@ for entry in pw.get_password("github.com", "me@example.com"):
 Full guide and API reference on the
 [website](https://michel-tricot.github.io/apwcli/); runnable scripts in
 [`examples/`](examples).
+
+## Troubleshooting
+
+You never launch or supervise anything: under the hood a background daemon
+starts on first use, and an unpaired command pops the macOS PIN dialog and
+prompts for the code (a small on-screen PIN window when there's no terminal).
+A pairing lasts as long as the daemon runs, so the PIN stays rare.
+
+If something misbehaves, start with `doctor` — it checks the whole chain and
+suggests the fix:
+
+```sh
+apwcli doctor           # diagnose the setup (browser, extension, daemon, pairing)
+apwcli daemon status    # daemon / extension / pairing state (--json for scripts)
+apwcli daemon pair      # (re)pair; --pin 123456 to skip the prompt
+apwcli daemon restart   # replace a wedged daemon with a fresh one
+apwcli daemon logs      # tail the log (-f to follow, --clear to wipe)
+apwcli daemon stop      # stop the daemon and its browser
+```
 
 ## Contributing
 
