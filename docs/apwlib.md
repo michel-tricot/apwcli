@@ -4,7 +4,7 @@
 the library behind [`apwcli`](apwcli.md).
 
 ```console
-$ pip install apwlib
+$ uv add apwlib   # or: pip install apwlib
 ```
 
 ## The facade
