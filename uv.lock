@@ -59,7 +59,7 @@ wheels = [
 
 [[package]]
 name = "apwcli"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "apwlib" },
@@ -100,7 +100,7 @@ docs = [
 
 [[package]]
 name = "apwlib"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/apwlib" }
 dependencies = [
     { name = "chauffeur" },
